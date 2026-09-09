@@ -1,0 +1,196 @@
+"""Row <-> domain translation, and the three places the schema and the enums differ.
+
+Every mismatch below is a real difference between ``backend/app/domain/enums.py`` and the
+CHECK constraints in ``db/migrations``. Neither side is mine to change, so the mapping is
+written down here, in one place, rather than being improvised at each call site. All
+three are reported back to whoever owns those two files.
+
+1. ``ActivityLevel`` has five members; ``health_profiles.activity_level`` accepts three
+   (``sedentary``/``moderate``/``heavy``, matching the ICMR-NIN bands used by
+   ``rda_targets``). Writing is lossy: ``light`` stores as ``sedentary`` and
+   ``very_active`` as ``heavy``.
+2. ``MealSlot.EVENING_SNACK`` is ``evening_snack``; ``meal_plan_items.meal_slot`` accepts
+   ``snack`` (and a ``bedtime`` the enum has no member for).
+3. ``health_profiles.sex`` also accepts ``prefer_not_to_say``, which reads back as
+   ``Sex.OTHER``.
+"""
+
+from __future__ import annotations
+
+from datetime import date, time
+from typing import Any
+
+from app.domain.enums import ActivityLevel, DietType, MealSlot, Sex
+from app.domain.models import Allergy, HealthProfile
+
+# ------------------------------------------------------------------ activity level
+
+_ACTIVITY_TO_DB: dict[ActivityLevel, str] = {
+    ActivityLevel.SEDENTARY: "sedentary",
+    ActivityLevel.LIGHT: "sedentary",
+    ActivityLevel.MODERATE: "moderate",
+    ActivityLevel.ACTIVE: "heavy",
+    ActivityLevel.VERY_ACTIVE: "heavy",
+}
+
+_ACTIVITY_FROM_DB: dict[str, ActivityLevel] = {
+    "sedentary": ActivityLevel.SEDENTARY,
+    "moderate": ActivityLevel.MODERATE,
+    "heavy": ActivityLevel.ACTIVE,
+}
+
+
+def activity_to_db(level: ActivityLevel) -> str:
+    return _ACTIVITY_TO_DB[level]
+
+
+def activity_from_db(value: str | None) -> ActivityLevel:
+    return _ACTIVITY_FROM_DB.get((value or "").strip(), ActivityLevel.MODERATE)
+
+
+# ---------------------------------------------------------------------- meal slot
+
+_SLOT_TO_DB: dict[MealSlot, str] = {
+    MealSlot.BREAKFAST: "breakfast",
+    MealSlot.MID_MORNING: "mid_morning",
+    MealSlot.LUNCH: "lunch",
+    MealSlot.EVENING_SNACK: "snack",
+    MealSlot.DINNER: "dinner",
+}
+
+_SLOT_FROM_DB: dict[str, MealSlot] = {
+    "breakfast": MealSlot.BREAKFAST,
+    "mid_morning": MealSlot.MID_MORNING,
+    "lunch": MealSlot.LUNCH,
+    "snack": MealSlot.EVENING_SNACK,
+    "evening_snack": MealSlot.EVENING_SNACK,
+    "dinner": MealSlot.DINNER,
+    # The schema allows a bedtime slot the enum has no member for. Reading it as the
+    # evening snack keeps a legacy row visible instead of dropping someone's plan item.
+    "bedtime": MealSlot.EVENING_SNACK,
+}
+
+
+def slot_to_db(slot: MealSlot) -> str:
+    return _SLOT_TO_DB[slot]
+
+
+def slot_from_db(value: str | None) -> MealSlot | None:
+    return _SLOT_FROM_DB.get((value or "").strip())
+
+
+# --------------------------------------------------------------------------- sex
+
+
+def sex_from_db(value: str | None) -> Sex:
+    raw = (value or "").strip()
+    if raw in ("male", "female"):
+        return Sex(raw)
+    return Sex.OTHER
+
+
+# --------------------------------------------------------------------- scalars
+
+
+def parse_date(value: Any) -> date | None:
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return date.fromisoformat(value.strip()[:10])
+        except ValueError:
+            return None
+    return None
+
+
+def parse_time(value: Any) -> time | None:
+    if isinstance(value, time):
+        return value
+    if isinstance(value, str) and value.strip():
+        raw = value.strip()
+        for length in (8, 5):
+            try:
+                return time.fromisoformat(raw[:length])
+            except ValueError:
+                continue
+    return None
+
+
+def parse_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def iso(value: date | time | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+# ------------------------------------------------------------------ health profile
+
+
+def health_profile_from_rows(
+    user_id: str,
+    row: dict[str, Any] | None,
+    allergies: list[dict[str, Any]] | None = None,
+) -> HealthProfile:
+    """Build the domain profile. A missing row gives the documented defaults."""
+    row = row or {}
+    meal_times: dict[MealSlot, time] = {}
+    raw_times = row.get("meal_times")
+    if isinstance(raw_times, dict):
+        for key, value in raw_times.items():
+            slot = slot_from_db(str(key))
+            parsed = parse_time(value)
+            if slot is not None and parsed is not None:
+                meal_times[slot] = parsed
+
+    diet_raw = (row.get("diet_type") or "").strip()
+    diet = DietType(diet_raw) if diet_raw in set(DietType) else DietType.NON_VEG
+
+    return HealthProfile(
+        user_id=user_id,
+        dob=parse_date(row.get("dob")),
+        sex=sex_from_db(row.get("sex")),
+        height_cm=parse_float(row.get("height_cm")),
+        weight_kg=parse_float(row.get("weight_kg")),
+        activity_level=activity_from_db(row.get("activity_level")),
+        diet_type=diet,
+        cuisine_pref=list(row.get("cuisine_pref") or []),
+        city=row.get("city"),
+        wake_time=parse_time(row.get("wake_time")),
+        sleep_time=parse_time(row.get("sleep_time")),
+        meal_times=meal_times,
+        conditions=list(row.get("conditions") or []),
+        allergies=[
+            Allergy(
+                allergen=str(a.get("allergen", "")).strip(),
+                severity=str(a.get("severity") or "unknown"),
+            )
+            for a in (allergies or [])
+            if str(a.get("allergen", "")).strip()
+        ],
+        is_pregnant=bool(row.get("pregnancy", False)),
+    )
+
+
+def health_profile_to_row(profile: HealthProfile) -> dict[str, Any]:
+    """Domain profile -> ``health_profiles`` row. ``user_id`` is set by the repository."""
+    return {
+        "dob": iso(profile.dob),
+        "sex": profile.sex.value,
+        "height_cm": profile.height_cm,
+        "weight_kg": profile.weight_kg,
+        "activity_level": activity_to_db(profile.activity_level),
+        "diet_type": profile.diet_type.value,
+        "cuisine_pref": list(profile.cuisine_pref),
+        "city": profile.city,
+        "wake_time": iso(profile.wake_time),
+        "sleep_time": iso(profile.sleep_time),
+        "meal_times": {slot_to_db(k): v.isoformat() for k, v in profile.meal_times.items()},
+        "conditions": list(profile.conditions),
+        "pregnancy": profile.is_pregnant,
+    }
