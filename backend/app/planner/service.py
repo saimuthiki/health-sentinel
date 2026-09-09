@@ -113,6 +113,10 @@ class PlannerService:
                 "plan_id": str(stored.get("id", "")),
                 "item_count": len(plan.items),
                 "safety_verdict": guarded.verdict.value,
+                # meal_plans has no hydration column, and inventing one is not mine to do.
+                # The figure lives on this audit row so a stored plan can be read back
+                # complete. Reported as a schema gap rather than worked around further.
+                "hydration_ml": plan.hydration_ml,
             },
         )
 

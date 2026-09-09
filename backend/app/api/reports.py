@@ -24,11 +24,12 @@ from app.api.deps import (
 from app.api.guarded import GuardedText, guarded_deterministic
 from app.core.config import Settings
 from app.core.errors import NotFound, PayloadTooLarge
-from app.domain.enums import Escalation, ReportStatus, ResultStatus
+from app.domain.enums import Escalation, ReportStatus, ResultStatus, max_escalation
 from app.ingest.files import validate_upload
 from app.ingest.pipeline import IngestResult, IngestService, ReviewItem
 from app.repositories.profiles import ProfileRepository
-from app.repositories.reports import ReportRepository
+from app.repositories.reports import ReportRepository, result_from_row
+from app.rules import red_flags as red_flag_rules
 
 router = APIRouter(prefix="/v1/reports", tags=["reports"])
 
@@ -115,7 +116,7 @@ async def upload_report(
     ingest: Ingest,
     profiles: Profiles,
     file: Annotated[UploadFile, File(description="PDF, JPEG, PNG or HEIC, up to 20 MB")],
-    settings: Settings = Depends(get_settings_dep),
+    settings: Annotated[Settings, Depends(get_settings_dep)],
 ) -> ReportDetail:
     """Stages 1-5, synchronously.
 
@@ -155,18 +156,42 @@ async def report_status(report_id: str, reports: Reports) -> dict[str, Any]:
 async def report_detail(
     report_id: str, reports: Reports, ingest: Ingest, profiles: Profiles
 ) -> ReportDetail:
+    """One stored report, with its red flags recomputed rather than remembered.
+
+    ``red_flags`` is not a table -- stage 5 is deterministic, so re-running it over the
+    stored ``lab_results`` costs nothing and cannot drift from the rules as they stand
+    today. A threshold we tighten next month applies to reports uploaded last month.
+    """
     row = await reports.by_id(report_id)
     if row is None:
         raise NotFound("That report does not exist, or is not yours.")
 
     stored = await reports.results_for(report_id)
-    results = [_result_out(r) for r in stored]
+    results = [
+        item for item in (result_from_row(entry) for entry in stored) if item is not None
+    ]
+    history = [
+        item
+        for item in (result_from_row(entry) for entry in await reports.history())
+        if item is not None
+    ]
+    flags = red_flag_rules.evaluate(results, history)
     review = await ingest.review_queue(report_id)
+
     return ReportDetail(
         report=_summary(row),
-        results=results,
+        results=[_result_out(entry) for entry in stored],
+        red_flags=[
+            RedFlagOut(
+                code=flag.code,
+                escalation=flag.escalation,
+                message=guarded_deterministic(flag.message, flag.escalation),
+                biomarker_code=flag.biomarker_code,
+            )
+            for flag in flags
+        ],
         review=[_review_out(item) for item in review],
-        escalation=Escalation.ROUTINE,
+        escalation=max_escalation(flag.escalation for flag in flags),
         reused_extraction=True,
     )
 
@@ -215,7 +240,11 @@ def _summary(row: dict[str, Any]) -> ReportSummary:
     status_raw = str(row.get("status") or "uploaded")
     return ReportSummary(
         id=str(row.get("id")),
-        status=ReportStatus(status_raw) if status_raw in set(ReportStatus) else ReportStatus.UPLOADED,
+        status=(
+            ReportStatus(status_raw)
+            if status_raw in set(ReportStatus)
+            else ReportStatus.UPLOADED
+        ),
         mime_type=row.get("mime_type"),
         report_type=row.get("report_type"),
         lab_name=row.get("lab_name"),
@@ -226,8 +255,6 @@ def _summary(row: dict[str, Any]) -> ReportSummary:
 
 
 def _detail(row: dict[str, Any], result: IngestResult) -> ReportDetail:
-    from app.domain.enums import max_escalation
-
     return ReportDetail(
         report=_summary({**row, "status": result.status.value,
                          "lab_name": result.lab_name or row.get("lab_name"),

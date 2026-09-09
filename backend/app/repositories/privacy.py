@@ -123,7 +123,7 @@ class ExportRepository(UserScopedRepository):
         for table, columns in EXPORT_TABLES:
             try:
                 data[table] = await self.db.select(table, columns=columns, limit=5000)
-            except Exception:  # noqa: BLE001 - one unreadable table must not void the export
+            except Exception:
                 log.warning("export skipped a table", table=table)
                 data[table] = []
         return {

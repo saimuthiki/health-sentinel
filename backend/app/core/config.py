@@ -20,7 +20,7 @@ from __future__ import annotations
 import functools
 from typing import Literal
 
-from pydantic import Field, ValidationError, field_validator
+from pydantic import ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Environment = Literal["development", "test", "staging", "production"]

@@ -20,7 +20,7 @@ rest of the product.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -42,8 +42,10 @@ class AppError(Exception):
     code: str = "internal-error"
     title: str = "Internal server error"
     detail: str = INTERNAL_DETAIL
-    #: Extra members merged into the problem document. Must never carry internals.
-    headers: dict[str, str] | None = None
+    #: Response headers a particular problem needs (WWW-Authenticate, Retry-After).
+    #: ClassVar because it is a per-class constant, replaced -- never mutated -- when an
+    #: instance is given extra headers.
+    headers: ClassVar[dict[str, str] | None] = None
 
     def __init__(
         self,
@@ -85,7 +87,7 @@ class AuthenticationError(AppError):
     code = "not-authenticated"
     title = "Not signed in"
     detail = "Your sign-in could not be verified. Please sign in again."
-    headers = {"WWW-Authenticate": "Bearer"}
+    headers: ClassVar[dict[str, str] | None] = {"WWW-Authenticate": "Bearer"}
 
 
 class PermissionDenied(AppError):

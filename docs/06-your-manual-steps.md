@@ -27,10 +27,48 @@ You pasted your key into a chat, so treat it as public.
 4. Wait ~2 minutes for it to build.
 5. Go to **Project Settings → API**. You will see three things:
    - **Project URL** — safe to share, goes in the app config.
-   - **anon / public key** — safe to ship in the app.
-   - **service_role key** — 🔴 **secret**. Never in the app, never in the repo, never in
-     chat. Only into Render in step M3.
-6. Tell me the **Project URL** and **anon key** — those two only.
+   - **anon / publishable key** — safe to ship in the app.
+   - **service_role / secret key** — 🔴 **secret**. Never in the app, never in the repo,
+     never in chat. Only into Render in step M3.
+6. Tell me the **Project URL** and the **anon / publishable key** — those two only.
+
+### M1a · Check how your project signs people in
+
+This decides one setting in M3, so it is worth two minutes now.
+
+When you sign in to the app, Supabase gives your phone a small pass called an **access
+token**. Our backend has to check that pass is genuine before it shows anyone any health
+data. There are two ways Supabase can sign that pass:
+
+- **The new way — a key pair.** Supabase keeps a private key nobody else ever sees, and
+  publishes the matching **public** key on a web page. Our backend fetches that public
+  page and uses it to check the signature. Nothing secret has to be copied anywhere, and
+  Supabase can swap keys whenever it likes without us changing a thing. Your project is
+  already set up this way (it uses a type called **ECC P-256**, sometimes written
+  **ES256**).
+- **The old way — one shared secret.** A single password that both Supabase and our
+  backend hold a copy of. It works, but a copy of a secret is one more thing that can
+  leak, and changing it means changing it in two places at once.
+
+To see yours:
+
+1. Supabase → **Project Settings → API** (or **JWT Keys**, depending on the version of
+   the dashboard you are looking at).
+2. Look for **JWT Signing Keys**. You should see a **Current key** whose type is
+   **ECC (P-256)**.
+3. You may also see a **Legacy / previously used** HS256 key kept alongside it. That is
+   normal right after a switch: passes handed out **before** the switch were signed the
+   old way and stay valid until they run out, which takes about an hour.
+
+**What this means for you:**
+
+- Normally you set **nothing extra**. The backend finds the public keys by itself.
+- Only if you have just switched, and you do not want anyone signed out mid-session, set
+  `SUPABASE_JWT_SECRET` in M3 for the first day or so — then delete it. The backend
+  writes a warning in its log every single time an old-style pass is used, so you can see
+  when they have stopped arriving.
+- **Do not send me any of these keys.** The Project URL and the anon key are the only two
+  things I need, and neither is secret.
 
 ---
 
@@ -56,16 +94,44 @@ In Supabase → **Authentication → Providers**:
    - **Instance type**: **Free**
 4. Open **Environment** and add these (click *Add Environment Variable* for each):
 
+   **Set these five:**
+
    | Key | Value |
    |---|---|
    | `GEMINI_API_KEY` | your **new** key from M0 |
    | `SUPABASE_URL` | Project URL from M1 |
-   | `SUPABASE_SERVICE_ROLE_KEY` | the 🔴 service_role key from M1 |
-   | `SUPABASE_JWT_SECRET` | Supabase → Settings → API → JWT Secret |
+   | `SUPABASE_ANON_KEY` | the **anon / publishable** key from M1 |
+   | `SUPABASE_SERVICE_ROLE_KEY` | the 🔴 **service_role / secret** key from M1 |
    | `ENVIRONMENT` | `development` |
+
+   **Do not set `SUPABASE_JWT_SECRET`.** It used to be on this list and it is not any
+   more. Your project signs sign-in passes with a key pair now (M1a), and the backend
+   fetches the public half by itself from
+   `https://<your-project>.supabase.co/auth/v1/.well-known/jwks.json`. One less secret in
+   the dashboard is one less secret that can leak.
+
+   The **only** reason to add it is the day you switch signing keys, so that passes handed
+   out a few minutes earlier keep working. If you do:
+
+   | Key | Value | Then |
+   |---|---|---|
+   | `SUPABASE_JWT_SECRET` | Supabase → Settings → API → **JWT Secret** (legacy) | **Delete this variable after a day.** |
+
+   While it is set, the backend writes a warning line in its Render log every time an
+   old-style pass arrives. When those lines stop, the old passes have all expired and the
+   variable can go.
+
+   **If a variable is missing**, the service will not start, and the log line tells you
+   exactly which ones — all of them at once, not one per attempt. Add them and click
+   **Manual Deploy → Deploy latest commit**.
 
 5. **Create Web Service.** Copy the URL it gives you (like
    `https://healthpulse-api.onrender.com`) and send it to me — that is not a secret.
+
+6. **Check it woke up properly.** Open `https://your-service.onrender.com/readyz` in a
+   browser. You want to see `"status": "ready"`. If it says `not_ready`, the page also
+   says which of the two — Supabase or Gemini — is not configured yet. It shows **only
+   yes/no**, never any part of a key, so it is safe to open on any device.
 
 > The free plan sleeps after 15 minutes of no traffic and takes ~50 seconds to wake. The app
 > shows a "waking up" message. We move to Google Cloud Run before public launch.

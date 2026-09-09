@@ -169,8 +169,7 @@ def configure_logging(*, level: str = "INFO", json_logs: bool = True) -> None:
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
-            structlog.stdlib.add_log_level,
-            structlog.stdlib.add_logger_name,
+            structlog.processors.add_log_level,
             structlog.processors.TimeStamper(fmt="iso", utc=True),
             request_id_processor,
             redaction_processor,
@@ -181,7 +180,11 @@ def configure_logging(*, level: str = "INFO", json_logs: bool = True) -> None:
             logging.getLevelName(level.upper()) if isinstance(level, str) else level
         ),
         logger_factory=structlog.PrintLoggerFactory(file=sys.stdout),
-        cache_logger_on_first_use=True,
+        # Not cached: module-level loggers are created at import time, before the app
+        # factory configures logging, and a cached bound logger would freeze whatever
+        # configuration happened to be in place first -- including in tests, where that
+        # silently disables the redaction processor being asserted on.
+        cache_logger_on_first_use=False,
     )
 
     root = logging.getLogger()
@@ -202,5 +205,14 @@ def _stdlib_handler() -> logging.Handler:
 
 
 def get_logger(name: str) -> Any:
-    """A bound structlog logger."""
-    return structlog.get_logger(name)
+    """A structlog logger carrying the module name.
+
+    Returned as structlog's lazy proxy, not a bound logger: modules call this at import
+    time, before :func:`configure_logging` runs, and ``.bind()`` would freeze the
+    processor chain as it stood at import -- silently bypassing redaction. The proxy
+    resolves the configuration at the moment something is actually logged.
+
+    The name goes in under ``logger_name`` because ``logger`` is taken by structlog's own
+    ``wrap_logger`` signature.
+    """
+    return structlog.get_logger(logger_name=name)

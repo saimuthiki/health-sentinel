@@ -149,6 +149,15 @@ class FoodLogRepository(UserScopedRepository):
             limit=200,
         )
 
+    async def food_id_for_log(self, food_log_id: str) -> str | None:
+        row = await self.db.select_one(
+            "food_logs", columns="food_id", filters={**self._mine, "id": eq(food_log_id)}
+        )
+        if row is None:
+            return None
+        food_id = row.get("food_id")
+        return str(food_id) if food_id else None
+
     async def rate(self, food_log_id: str, rating: int, note: str | None = None) -> dict[str, Any]:
         row = {
             "user_id": self.user_id,

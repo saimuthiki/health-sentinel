@@ -55,9 +55,9 @@ def get_safety_judge(request: Request) -> object | None:
 
 
 async def get_principal(
+    settings: Annotated[Settings, Depends(get_settings_dep)],
+    jwks: Annotated[JwksCache, Depends(get_jwks)],
     authorization: Annotated[str | None, Header()] = None,
-    settings: Settings = Depends(get_settings_dep),
-    jwks: JwksCache = Depends(get_jwks),
 ) -> Principal:
     """The verified caller. Everything user-facing depends on this."""
     return await verify_token(bearer_token(authorization), settings, jwks)
@@ -70,19 +70,22 @@ CurrentUser = Annotated[Principal, Depends(get_principal)]
 
 
 def get_profiles(
-    principal: CurrentUser, gateway: SupabaseGateway = Depends(get_gateway)
+    principal: CurrentUser,
+    gateway: Annotated[SupabaseGateway, Depends(get_gateway)],
 ) -> ProfileRepository:
     return ProfileRepository(gateway.rest(gateway.as_user(principal)), principal.user_id)
 
 
 def get_reports(
-    principal: CurrentUser, gateway: SupabaseGateway = Depends(get_gateway)
+    principal: CurrentUser,
+    gateway: Annotated[SupabaseGateway, Depends(get_gateway)],
 ) -> ReportRepository:
     return ReportRepository(gateway.rest(gateway.as_user(principal)), principal.user_id)
 
 
 def get_reference(
-    principal: CurrentUser, gateway: SupabaseGateway = Depends(get_gateway)
+    principal: CurrentUser,
+    gateway: Annotated[SupabaseGateway, Depends(get_gateway)],
 ) -> ReferenceRepository:
     # Reference tables have a SELECT policy for `authenticated`, so the user's own token
     # reads them. No service role, even though the data is not user data.
@@ -90,55 +93,64 @@ def get_reference(
 
 
 def get_chat(
-    principal: CurrentUser, gateway: SupabaseGateway = Depends(get_gateway)
+    principal: CurrentUser,
+    gateway: Annotated[SupabaseGateway, Depends(get_gateway)],
 ) -> ChatRepository:
     return ChatRepository(gateway.rest(gateway.as_user(principal)), principal.user_id)
 
 
 def get_plans(
-    principal: CurrentUser, gateway: SupabaseGateway = Depends(get_gateway)
+    principal: CurrentUser,
+    gateway: Annotated[SupabaseGateway, Depends(get_gateway)],
 ) -> PlanRepository:
     return PlanRepository(gateway.rest(gateway.as_user(principal)), principal.user_id)
 
 
 def get_alerts(
-    principal: CurrentUser, gateway: SupabaseGateway = Depends(get_gateway)
+    principal: CurrentUser,
+    gateway: Annotated[SupabaseGateway, Depends(get_gateway)],
 ) -> AlertRepository:
     return AlertRepository(gateway.rest(gateway.as_user(principal)), principal.user_id)
 
 
 def get_grocery(
-    principal: CurrentUser, gateway: SupabaseGateway = Depends(get_gateway)
+    principal: CurrentUser,
+    gateway: Annotated[SupabaseGateway, Depends(get_gateway)],
 ) -> GroceryRepository:
     return GroceryRepository(gateway.rest(gateway.as_user(principal)), principal.user_id)
 
 
 def get_food_logs(
-    principal: CurrentUser, gateway: SupabaseGateway = Depends(get_gateway)
+    principal: CurrentUser,
+    gateway: Annotated[SupabaseGateway, Depends(get_gateway)],
 ) -> FoodLogRepository:
     return FoodLogRepository(gateway.rest(gateway.as_user(principal)), principal.user_id)
 
 
 def get_goals(
-    principal: CurrentUser, gateway: SupabaseGateway = Depends(get_gateway)
+    principal: CurrentUser,
+    gateway: Annotated[SupabaseGateway, Depends(get_gateway)],
 ) -> GoalRepository:
     return GoalRepository(gateway.rest(gateway.as_user(principal)), principal.user_id)
 
 
 def get_audit(
-    principal: CurrentUser, gateway: SupabaseGateway = Depends(get_gateway)
+    principal: CurrentUser,
+    gateway: Annotated[SupabaseGateway, Depends(get_gateway)],
 ) -> AuditRepository:
     return AuditRepository(gateway.rest(gateway.as_user(principal)), principal.user_id)
 
 
 def get_export(
-    principal: CurrentUser, gateway: SupabaseGateway = Depends(get_gateway)
+    principal: CurrentUser,
+    gateway: Annotated[SupabaseGateway, Depends(get_gateway)],
 ) -> ExportRepository:
     return ExportRepository(gateway.rest(gateway.as_user(principal)), principal.user_id)
 
 
 def get_storage(
-    principal: CurrentUser, gateway: SupabaseGateway = Depends(get_gateway)
+    principal: CurrentUser,
+    gateway: Annotated[SupabaseGateway, Depends(get_gateway)],
 ) -> StorageClient:
     # The user's own token. Storage RLS compares the first folder of the object name
     # against auth.uid(), so a path outside their folder is refused by the database.
@@ -146,7 +158,8 @@ def get_storage(
 
 
 def get_deletion(
-    principal: CurrentUser, gateway: SupabaseGateway = Depends(get_gateway)
+    principal: CurrentUser,
+    gateway: Annotated[SupabaseGateway, Depends(get_gateway)],
 ) -> DeletionRepository:
     """The one dependency that carries the service-role key. See app.repositories.privacy
     for the justification of each privileged operation."""
@@ -167,11 +180,11 @@ def get_deletion(
 
 def get_ingest(
     principal: CurrentUser,
-    reports: ReportRepository = Depends(get_reports),
-    reference: ReferenceRepository = Depends(get_reference),
-    storage: StorageClient = Depends(get_storage),
-    audit: AuditRepository = Depends(get_audit),
-    gemini: GeminiClient | None = Depends(get_gemini),
+    reports: Annotated[ReportRepository, Depends(get_reports)],
+    reference: Annotated[ReferenceRepository, Depends(get_reference)],
+    storage: Annotated[StorageClient, Depends(get_storage)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    gemini: Annotated[GeminiClient | None, Depends(get_gemini)],
 ) -> IngestService:
     return IngestService(
         reports=reports,
@@ -184,11 +197,11 @@ def get_ingest(
 
 
 def get_assembler(
-    profiles: ProfileRepository = Depends(get_profiles),
-    reports: ReportRepository = Depends(get_reports),
-    goals: GoalRepository = Depends(get_goals),
-    food_logs: FoodLogRepository = Depends(get_food_logs),
-    reference: ReferenceRepository = Depends(get_reference),
+    profiles: Annotated[ProfileRepository, Depends(get_profiles)],
+    reports: Annotated[ReportRepository, Depends(get_reports)],
+    goals: Annotated[GoalRepository, Depends(get_goals)],
+    food_logs: Annotated[FoodLogRepository, Depends(get_food_logs)],
+    reference: Annotated[ReferenceRepository, Depends(get_reference)],
 ) -> ContextAssembler:
     return ContextAssembler(
         profiles=profiles,
@@ -200,13 +213,13 @@ def get_assembler(
 
 
 def get_planner(
-    assembler: ContextAssembler = Depends(get_assembler),
-    plans: PlanRepository = Depends(get_plans),
-    alerts: AlertRepository = Depends(get_alerts),
-    reference: ReferenceRepository = Depends(get_reference),
-    audit: AuditRepository = Depends(get_audit),
-    gemini: GeminiClient | None = Depends(get_gemini),
-    judge: object | None = Depends(get_safety_judge),
+    assembler: Annotated[ContextAssembler, Depends(get_assembler)],
+    plans: Annotated[PlanRepository, Depends(get_plans)],
+    alerts: Annotated[AlertRepository, Depends(get_alerts)],
+    reference: Annotated[ReferenceRepository, Depends(get_reference)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    gemini: Annotated[GeminiClient | None, Depends(get_gemini)],
+    judge: Annotated[object | None, Depends(get_safety_judge)],
 ) -> PlannerService:
     return PlannerService(
         assembler=assembler,
@@ -219,7 +232,9 @@ def get_planner(
     )
 
 
-async def require_consent(profiles: ProfileRepository = Depends(get_profiles)) -> None:
+async def require_consent(
+    profiles: Annotated[ProfileRepository, Depends(get_profiles)],
+) -> None:
     """Guard for anything that analyses health data.
 
     docs/02-architecture.md §6: consent is recorded before analysis, not alongside it.

@@ -10,7 +10,7 @@ prints configuration is a free reconnaissance endpoint.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, Field
@@ -49,7 +49,8 @@ async def healthz() -> Liveness:
 
 @router.get("/readyz", response_model=Readiness, summary="Readiness")
 async def readyz(
-    response: Response, settings: Settings = Depends(get_settings_dep)
+    response: Response,
+    settings: Annotated[Settings, Depends(get_settings_dep)],
 ) -> Readiness:
     """Configuration is present. No dependency is contacted and no value is revealed."""
     checks = ReadinessChecks(

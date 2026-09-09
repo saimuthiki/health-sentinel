@@ -115,12 +115,16 @@ def validate_upload(
         )
     if sniffed not in allowed:
         raise UnsupportedMedia()
-    if declared is not None and declared in allowed and declared != sniffed:
-        # HEIC and HEIF share a container, so treat them as the same family.
-        if {declared, sniffed} != {HEIC, HEIF}:
-            raise UnsupportedMedia(
-                "The file does not match the type it was sent as, so we did not open it."
-            )
+    # HEIC and HEIF share a container, so a mismatch between those two is not a lie.
+    if (
+        declared is not None
+        and declared in allowed
+        and declared != sniffed
+        and {declared, sniffed} != {HEIC, HEIF}
+    ):
+        raise UnsupportedMedia(
+            "The file does not match the type it was sent as, so we did not open it."
+        )
 
     return ValidatedUpload(
         data=data,

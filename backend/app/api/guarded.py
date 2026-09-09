@@ -197,7 +197,9 @@ def guarded_deterministic(
     return _mint(text)
 
 
-def guarded_many(texts: Sequence[str], escalation: Escalation = Escalation.ROUTINE) -> list[GuardedText]:
+def guarded_many(
+    texts: Sequence[str], escalation: Escalation = Escalation.ROUTINE
+) -> list[GuardedText]:
     """:func:`guarded_deterministic` over a sequence."""
     return [guarded_deterministic(text, escalation) for text in texts]
 

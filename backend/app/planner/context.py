@@ -50,9 +50,7 @@ def latest_per_biomarker(results: list[ClassifiedResult]) -> list[ClassifiedResu
         if current is None:
             best[result.biomarker_code] = result
             continue
-        if current.measured_on is None and result.measured_on is not None:
-            best[result.biomarker_code] = result
-        elif (
+        if (current.measured_on is None and result.measured_on is not None) or (
             result.measured_on is not None
             and current.measured_on is not None
             and result.measured_on > current.measured_on

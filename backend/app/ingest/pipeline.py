@@ -153,7 +153,7 @@ class IngestService:
     async def _discard(self, path: str) -> None:
         try:
             await self.storage.remove([path])
-        except Exception:  # noqa: BLE001 - cleanup must never mask the original failure
+        except Exception:
             log.warning("could not remove an orphaned upload")
 
     # -- stages 2-5 --------------------------------------------------------

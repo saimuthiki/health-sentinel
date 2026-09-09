@@ -70,7 +70,10 @@ class ProfileRepository(UserScopedRepository):
         return health_profile_from_rows(self.user_id, row, allergies)
 
     async def has_health_profile(self) -> bool:
-        return await self.db.select_one("health_profiles", columns="user_id", filters=self._mine) is not None
+        row = await self.db.select_one(
+            "health_profiles", columns="user_id", filters=self._mine
+        )
+        return row is not None
 
     async def save_health_profile(self, profile: HealthProfile) -> HealthProfile:
         row = health_profile_to_row(profile)
