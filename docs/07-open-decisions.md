@@ -1,45 +1,54 @@
-# Open decisions
+# Decisions
 
-Answer these and I will lock them into the design. My recommendation is first in each list.
+Resolved 9 September 2026. The owner asked for "the end result, not the prototype" on
+every axis, so where a decision offered an easy interim option and a production one, the
+production one is recorded here.
 
-### D1 · Product name
-Repo stays `health-sentinel`; the app's display name can differ.
-- **HealthPulse** *(recommended — from your list, cleanest, reads as coaching not diagnosis)*
-- MyHealth AI · HealthMate AI *(both are heavily used on the Play Store already)*
+| # | Decision | Chosen | Note |
+|---|---|---|---|
+| D1 | Product name | **HealthPulse** | Repo stays `health-sentinel`. ⚠️ Still to do: search the Play Store and a trademark register before this goes on an icon |
+| D2 | Database | **Supabase** (Postgres + RLS + Auth + Storage) | Relational schema, isolation enforced by the database |
+| D3 | Push | **Local notifications AND Firebase Cloud Messaging** | See below — this one is not either/or |
+| D4 | Backend host | **Google Cloud Run**, with Render as the working stopgap | See below |
+| D5 | Auth | **Multi-user with real auth from day one** | |
+| D6 | Food data | **Indian foods first** (IFCT + USDA), English UI | |
+| D7 | iOS | **Code kept iOS-clean; iOS shipped in Phase 9** | Needs a Mac and $99/year — a hard external constraint, not a code one |
+| D8 | Signing | **Proper upload keystore** | Manual step M7 |
 
-⚠️ Whatever you pick, search the Play Store and a trademark register before you print it on
-an icon. Name collisions are a common reason listings get rejected.
+## D3 — why this is not either/or
 
-### D2 · Database — Supabase or Firebase
-- **Supabase** *(recommended — see `02-architecture.md` §3: your schema is relational, RLS
-  gives real per-user isolation, storage is on the free tier)*
-- Firebase — better Flutter tooling and FCM built in, but document-store friction and
-  Storage now wants a billing account on new projects.
+The choice was framed as local notifications *or* FCM, and that framing was wrong. A
+production system wants both, because they solve different problems:
 
-### D3 · Push notifications
-- **Device-local notifications only for now** *(recommended — covers every time-based alert
-  you listed, needs no server, works offline; add FCM in Phase 7)*
-- Firebase Cloud Messaging from day one.
+- **Device-local notifications** handle everything time-based: meals, water, sleep,
+  activity, grocery day. The phone's own alarm clock fires them. They work with the app
+  closed, with no network, and with the backend asleep. Routing these through a server
+  would make them *less* reliable, not more.
+- **Firebase Cloud Messaging** handles what only the server knows: your weekly summary
+  finished generating, a re-test is due, a newly uploaded report finished analysing.
 
-### D4 · Backend host
-- **Render free** *(recommended to start — no card, 50 s cold start)*
-- Google Cloud Run *(better, needs a card on file even though you stay free)*
+Both ship. Local notifications carry the daily loop; FCM carries server-initiated events.
 
-### D5 · Multi-user from day one, or single-user first?
-- **Multi-user with real auth from day one** *(recommended — you want a public app, and
-  retrofitting auth and per-user isolation later is painful and risky with health data)*
-- Single-user POC first, add auth later.
+## D4 — why Render is still in the picture
 
-### D6 · Food database focus
-- **Indian foods first (IFCT + USDA), English UI** *(recommended)*
-- Global/generic first.
+Cloud Run is the right production target: it scales to zero, wakes in about a second, and
+2 million requests a month are free. It needs a card on file even though the usage stays
+free.
 
-### D7 · iOS
-- **Android only for now, keep the code iOS-clean** *(recommended — an Apple developer
-  account is $99/year and you cannot build iOS without a Mac)*
-- Plan for iOS in Phase 9.
+Render is already provisioned and its free instance sleeps after 15 minutes, waking in
+around 50 seconds. That is a bad experience for a health app you open in the morning.
 
-### D8 · Signing
-- **Generate a proper upload keystore now (M7)** *(recommended — five minutes, and required
-  for the Play Store later)*
-- Debug-signed release APKs for now; add the keystore before release.
+So: Render stays as the working deployment while the API is built, and Cloud Run becomes
+the target before anyone but the owner uses the app. Both are described in
+`docs/06-your-manual-steps.md`. Nothing in the code depends on which one is running.
+
+## Still open
+
+1. **The four clinical conflicts** in `db/seed/GAPS.md` — the vitamin D cut-off in
+   particular changes how many users get flagged. These want a clinician, not a developer.
+2. **Age coverage.** Seeded reference ranges and RDAs cover adults 19–59. There are no
+   paediatric ranges beyond haemoglobin and no pregnancy ranges beyond haemoglobin. Until
+   that is commissioned, **the app is adults-only in practice** and should say so.
+3. **Gemini tier.** The free tier permits Google to use uploads for product improvement.
+   Acceptable while the owner tests on their own reports. Not acceptable once other
+   people's health data flows through it — paid tier before public release.

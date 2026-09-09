@@ -32,6 +32,9 @@ values
   ('MCH', 'Mean Corpuscular Haemoglobin', 'haematology', 'pg', null),
   ('MCHC', 'Mean Corpuscular Haemoglobin Concentration', 'haematology', 'g/dL', null),
   ('RDW', 'Red Cell Distribution Width', 'haematology', '%', true),
+  -- Printed on the Redcliffe/AHC hybrid panel used in Hyderabad.
+  ('PDW', 'Platelet Distribution Width', 'haematology', 'fL', null),
+  ('MPV', 'Mean Platelet Volume', 'haematology', 'fL', null),
   ('NEUT_PCT', 'Neutrophils', 'haematology', '%', null),
   -- Absolute neutrophil count, not the percentage. The neutropenia red-flag rule
   -- in backend/app/rules/red_flags.py fires below 500 cells/uL and can only ever
@@ -52,6 +55,7 @@ values
   ('NON_HDL', 'Non-HDL Cholesterol', 'lipid', 'mg/dL', true),
   ('CHOL_HDL_RATIO', 'Total Cholesterol / HDL Ratio', 'lipid', 'ratio', true),
   ('LDL_HDL_RATIO', 'LDL / HDL Ratio', 'lipid', 'ratio', true),
+  ('TRIG_HDL_RATIO', 'Triglyceride / HDL Ratio', 'lipid', 'ratio', true),
   ('LIPOPROTEIN_A', 'Lipoprotein (a)', 'lipid', 'mg/dL', true),
   ('APO_B', 'Apolipoprotein B', 'lipid', 'mg/dL', true),
   -- thyroid
@@ -113,6 +117,9 @@ values
   ('CRP_HS', 'High Sensitivity C-Reactive Protein', 'inflammation', 'mg/L', true),
   -- metabolic
   ('HOMOCYSTEINE', 'Homocysteine', 'metabolic', 'umol/L', true),
+  -- Derived from HbA1c by the lab, not measured. Classified as UNKNOWN unless a
+  -- cited range is ever added; it is shown for continuity with the printed report.
+  ('AVG_GLUCOSE', 'Average Blood Glucose (from HbA1c)', 'metabolic', 'mg/dL', true),
   -- tumour_marker
   ('PSA', 'Prostate Specific Antigen (Total)', 'tumour_marker', 'ng/mL', true),
   -- muscle
@@ -129,5 +136,5 @@ values
   ('PROLACTIN', 'Prolactin', 'hormone', 'ng/mL', true)
 on conflict (code) do nothing;
 
--- Check: this must print 84.
+-- Check: this must print 88.
 select count(*) as biomarkers_loaded from public.biomarkers;

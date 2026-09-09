@@ -481,6 +481,52 @@ insert into public.biomarker_synonyms (synonym, biomarker_code, source) values
   ('zn', 'ZINC', 'common')
 on conflict (synonym) do nothing;
 
+-- ---------------------------------------------------------------------------
+-- Names taken verbatim from a real 18-page AHC hybrid panel issued in Hyderabad
+-- in September 2026. Half of the test names on that report did not match any
+-- synonym seeded from general knowledge, which is why report-derived synonyms
+-- matter more than plausible-sounding ones. Note the missing and irregular
+-- spacing ("bilirubin -direct", "unsat.iron-binding capacity(uibc)") -- that is
+-- how the lab prints it, and the normaliser has to cope with it.
+-- ---------------------------------------------------------------------------
+insert into public.biomarker_synonyms (synonym, biomarker_code, source) values
+  ('alanine transaminase (sgpt)', 'ALT', 'indian_lab'),
+  ('aspartate aminotransferase (sgot)', 'AST', 'indian_lab'),
+  ('gamma glutamyl transferase (ggt)', 'GGT', 'indian_lab'),
+  ('blood urea nitrogen (bun)', 'BUN', 'indian_lab'),
+  ('est. glomerular filtration rate (egfr)', 'EGFR', 'indian_lab'),
+  ('albumin - serum', 'ALBUMIN', 'indian_lab'),
+  ('protein - total', 'PROTEIN_TOTAL', 'indian_lab'),
+  ('bilirubin - total', 'BILI_TOTAL', 'indian_lab'),
+  ('bilirubin -direct', 'BILI_DIRECT', 'indian_lab'),
+  ('bilirubin (indirect)', 'BILI_INDIRECT', 'indian_lab'),
+  ('creatinine - serum', 'CREATININE', 'indian_lab'),
+  ('serum globulin', 'GLOBULIN', 'indian_lab'),
+  ('serum alb/globulin ratio', 'AG_RATIO', 'indian_lab'),
+  ('ldl cholesterol - direct', 'LDL', 'indian_lab'),
+  ('hdl cholesterol - direct', 'HDL', 'indian_lab'),
+  ('tc/ hdl cholesterol ratio', 'CHOL_HDL_RATIO', 'indian_lab'),
+  ('hdl / ldl ratio', 'LDL_HDL_RATIO', 'indian_lab'),
+  ('trig / hdl ratio', 'TRIG_HDL_RATIO', 'indian_lab'),
+  ('fasting blood sugar(glucose)', 'GLUCOSE_FASTING', 'indian_lab'),
+  ('average blood glucose (abg)', 'AVG_GLUCOSE', 'indian_lab'),
+  ('tsh - ultrasensitive', 'TSH', 'indian_lab'),
+  ('total triiodothyronine (t3)', 'T3_TOTAL', 'indian_lab'),
+  ('total thyroxine (t4)', 'T4_TOTAL', 'indian_lab'),
+  ('25-oh vitamin d (total)', 'VITD_25OH', 'indian_lab'),
+  ('total iron binding capacity (tibc)', 'TIBC', 'indian_lab'),
+  ('unsat.iron-binding capacity(uibc)', 'UIBC', 'indian_lab'),
+  ('prostate specific antigen (psa)', 'PSA', 'indian_lab'),
+  ('platelet distribution width(pdw)', 'PDW', 'indian_lab'),
+  ('platelet distribution width', 'PDW', 'common'),
+  ('pdw', 'PDW', 'common'),
+  ('mean platelet volume', 'MPV', 'common'),
+  ('mpv', 'MPV', 'common'),
+  ('total rbc', 'RBC', 'indian_lab'),
+  ('erythrocyte sedimentation rate (esr)', 'ESR', 'indian_lab')
+on conflict (synonym) do nothing;
+
+
 
 -- Check: this must print 353.
 select count(*) as synonyms_loaded from public.biomarker_synonyms;
