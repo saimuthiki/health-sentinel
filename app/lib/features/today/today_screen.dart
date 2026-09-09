@@ -96,9 +96,7 @@ class _TodayBody extends ConsumerWidget {
     final HpPalette p = context.hp;
     final DateTime now = DateTime.now();
     final HealthRepository repository = ref.watch(healthRepositoryProvider);
-    final DateTime? cachedAt = repository is CacheAware
-        ? repository.servedFromCacheAt(CacheAware.cacheSubjectToday)
-        : null;
+    final DateTime? cachedAt = _servedFromCacheAt(repository);
 
     return RefreshIndicator(
       onRefresh: () async => ref.invalidate(todayProvider),
@@ -384,3 +382,14 @@ class _FocusCard extends StatelessWidget {
     );
   }
 }
+
+/// When Today's content was last fetched, or null if it came straight off the
+/// network or the repository does not cache at all.
+///
+/// Takes [Object] rather than [HealthRepository] on purpose: promotion from
+/// [Object] to [CacheAware] always applies, so this needs no cast in either
+/// direction. `flutter analyze` treats both an unpromoted call and an
+/// unnecessary cast as build failures, and this avoids having to guess which.
+DateTime? _servedFromCacheAt(Object repository) => repository is CacheAware
+    ? repository.servedFromCacheAt(CacheAware.cacheSubjectToday)
+    : null;

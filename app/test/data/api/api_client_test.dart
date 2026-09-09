@@ -18,9 +18,11 @@ import '_fake_http.dart';
 /// not a hypothetical, and the single token refresh on a 401, which has to be
 /// exactly once or it becomes a loop that locks somebody out of their own data.
 class _Tokens implements AuthTokenProvider {
-  _Tokens({this.token = 'first-token', this.renewsTo = 'fresh-token'});
+  _Tokens({this.renewsTo = 'fresh-token'});
 
-  String? token;
+  /// Mutated by the tests to simulate a token going stale; never set at
+  /// construction, which is why it is not a constructor parameter.
+  String? token = 'first-token';
   final String? renewsTo;
   int refreshes = 0;
 
