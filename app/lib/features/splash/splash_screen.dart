@@ -48,6 +48,21 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     final HpPalette p = context.hp;
+
+    // A build with no backend never asks for a session at all: there is nothing
+    // to ask. Saying so is the calm answer; a spinner over a socket that will
+    // never connect is not.
+    if (ref.watch(apiClientProvider) == null &&
+        !ref.watch(appConfigProvider).isReady) {
+      WidgetsBinding.instance.addPostFrameCallback((Duration _) {
+        if (!_routed && mounted) {
+          _routed = true;
+          context.go('/not-configured');
+        }
+      });
+      return _splashBody(p);
+    }
+
     final AsyncValue<AuthSession?> session =
         ref.watch(sessionControllerProvider);
 
@@ -59,6 +74,10 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
       _scheduleRoute(null);
     }
 
+    return _splashBody(p);
+  }
+
+  Widget _splashBody(HpPalette p) {
     return Scaffold(
       backgroundColor: p.ground,
       body: Center(

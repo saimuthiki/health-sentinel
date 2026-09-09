@@ -10,6 +10,7 @@ import '../../core/theme/hp_typography.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/models/models.dart';
 import '../../data/providers.dart';
+import '../common/failure_copy.dart';
 import '../common/severity_ui.dart';
 
 /// One report, value by value.
@@ -47,7 +48,12 @@ class ReportDetailScreen extends ConsumerWidget {
                     const HpLoadingState(message: 'Opening the report'),
                 error: (Object error, StackTrace stack) => HpErrorState(
                   title: 'This report could not be opened',
-                  body: 'The app could not reach the health engine.',
+                  // Never answered from the cache: a report shows lab values
+                  // and any red flag over them, and both have to be current.
+                  body: explainFailure(
+                    error,
+                    fallback: 'The app could not reach the health engine.',
+                  ),
                   onRetry: () => ref.invalidate(reportProvider(reportId)),
                 ),
                 data: (HealthReport data) => _Body(report: data),
@@ -80,6 +86,19 @@ class _Body extends StatelessWidget {
         HpSpacing.section,
       ),
       children: <Widget>[
+        // Before the report's own name, before a single value, and with no way
+        // to put it away. An `urgent` finding from the backend is the reason
+        // this screen exists on the day it appears; everything else on it can
+        // wait until it has been read.
+        for (final EscalationNotice notice in report.escalations) ...<Widget>[
+          HpEscalationCard(
+            title: notice.title,
+            body: notice.body,
+            steps: notice.steps,
+            footnote: notice.sourceCitation,
+          ),
+          const SizedBox(height: HpSpacing.xxl),
+        ],
         Text(
           report.labName ?? report.fileName,
           style: HpType.display.copyWith(color: p.ink),

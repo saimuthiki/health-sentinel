@@ -27,6 +27,56 @@ properties file committed without its jar breaks that, which is why both are ign
 `pubspec.lock` is not committed either — it is resolved by CI rather than hand-written
 without a Dart SDK.
 
+## Configuration — the three `--dart-define` values
+
+Nothing in this directory contains an address or a key. All three values are
+supplied at **build time** and default to empty, so a fresh clone builds an app
+that opens on a calm "Not connected yet" screen rather than one that crashes on
+its first request or hangs on a socket that will never connect.
+
+```bash
+flutter build apk --release \
+  --dart-define=SUPABASE_URL=https://YOUR-PROJECT.supabase.co \
+  --dart-define=SUPABASE_ANON_KEY=YOUR-ANON-KEY \
+  --dart-define=API_BASE_URL=https://YOUR-BACKEND.onrender.com
+```
+
+The same three flags work with `flutter run`, `flutter build appbundle` and
+`flutter test`:
+
+```bash
+flutter run \
+  --dart-define=SUPABASE_URL=https://YOUR-PROJECT.supabase.co \
+  --dart-define=SUPABASE_ANON_KEY=YOUR-ANON-KEY \
+  --dart-define=API_BASE_URL=https://YOUR-BACKEND.onrender.com
+```
+
+If you have many flags, `--dart-define-from-file=env.json` takes them from a
+JSON file instead. **Add that file to `.gitignore`.** It is not committed here,
+and CI does not pass any of these flags: an APK built by CI is deliberately an
+unconfigured one.
+
+| Define | What it is | Secret? |
+|---|---|---|
+| `SUPABASE_URL` | `https://<project>.supabase.co` | No — an address. |
+| `SUPABASE_ANON_KEY` | The **publishable** anon key | No. It is designed to ship in a client; every table it can reach is fenced by Row Level Security. |
+| `API_BASE_URL` | The root of our own FastAPI service | No — an address. |
+
+**The service-role key must never appear anywhere under `app/`.** It bypasses
+Row Level Security completely, so one inside an APK hands every user's health
+data to anyone who unzips it. `AppConfig` reads the `role` claim out of whatever
+key it was given and refuses to start the app if it is not `anon`
+(`test/core/app_config_test.dart` covers it). The Gemini key never comes near
+this directory at all — the app talks to our backend, and the backend talks to
+Gemini.
+
+### What happens when a value is missing
+
+The app opens on `/not-configured`, which names the missing defines, shows the
+command above, and offers a way through to the sample data. It never shows a
+key, a fragment of a key, or an exception. `FakeHealthRepository` stays the
+default in that state, which is also what every widget test runs against.
+
 ### Release signing
 
 `flutter build apk --release` works on a fresh clone: if `android/key.properties` is
@@ -67,9 +117,15 @@ app/
 │   │   ├── format/              dates, times, numbers
 │   │   └── router/              go_router configuration
 │   ├── data/
+│   │   ├── api/                 http client, problem+json error mapper,
+│   │   │                        cold-start handling, wire ↔ model mapping
+│   │   ├── cache/               sqflite offline store + staleness
 │   │   ├── models/              plain Dart, hand-written fromJson/toJson
-│   │   ├── repository/          HealthRepository + FakeHealthRepository
+│   │   ├── repository/          HealthRepository, FakeHealthRepository,
+│   │   │                        HttpHealthRepository
 │   │   └── providers.dart       Riverpod wiring
+│   ├── services/                Supabase auth gateway, alert scheduling
+│   │                            arithmetic, local notifications
 │   ├── features/                splash · consent · auth · profile setup ·
 │   │                            shell · today · reports · plan · chat · more
 │   ├── app.dart
@@ -218,6 +274,100 @@ in the environment this code is authored in, and their absence is a build failur
 than a warning, so every `fromJson`/`toJson` in `lib/data/models/` is written by hand and
 covered by a round-trip test.
 
+## Talking to the backend
+
+### The seam
+
+`HealthRepository` is the only thing the screens know about.
+`FakeHealthRepository` and `HttpHealthRepository` implement exactly the same
+interface, and `healthRepositoryProvider` picks between them on one condition:
+is there an API address and did Supabase come up? Nothing else in the app
+changes when the real service is switched on, and every widget test keeps
+running against the fake.
+
+### The cold start is real, and it is handled explicitly
+
+The health engine runs on Render's free tier. A free instance is stopped after
+about fifteen minutes without traffic and is started again by the first request
+that arrives — which takes roughly **fifty seconds**. A twenty-second timeout
+turns every first-open-of-the-day into a failure; a sixty-second timeout on
+every request turns a genuinely broken network into a minute of staring.
+
+So `ApiClient` tracks whether it believes the instance is up (a success inside
+the last ten minutes). When it does not, it wakes the backend first with an
+unauthenticated `GET /healthz` on a long timeout, retried once, before the real
+request goes anywhere near the wire — and emits `ApiPhase.waking` if that takes
+more than a couple of seconds, which is what puts *"Waking up the health
+engine"* on Today instead of an unexplained spinner.
+
+Waking with a probe rather than retrying the real request is deliberate.
+Retrying a `POST /v1/chat/messages` that timed out can send the same message
+twice, and the client cannot tell a request that never arrived from one that
+arrived and answered slowly. A probe has no such problem. GETs and PUTs are
+still replayed once if they time out after the probe succeeded; POSTs are not.
+Report uploads are the one exception, because the backend hashes the file and
+answers a duplicate from the stored extraction rather than reading it twice.
+
+### Errors
+
+The API answers every failure as RFC 9457 `application/problem+json`. The client
+reads the `type`, matches it against `ApiFailureKind`, and shows **a sentence
+this app wrote**. The server's own `detail` is kept for logs and never rendered:
+it can change without the app knowing, a proxy can substitute its own body, and
+a 500 detail is deliberately the same fixed sentence whatever happened.
+
+### What the API does not have yet
+
+Answered honestly rather than filled in on the client:
+
+| Screen wants | Status |
+|---|---|
+| Day nutrient totals and ICMR targets | Not returned. Adding item nutrients up on the phone is exactly what the safety charter forbids, so they come back empty. |
+| Goals, biomarker trends | No endpoint. Empty lists. |
+| A report headline | Not returned by `GET /v1/reports/{id}`. Left null. |
+| Hydration *logged* | No endpoint — the plan carries a target and nothing to count against it. The running total is kept on the phone, per day, and presented as the user's own tally. |
+| A `lab_results` row id | `ResultOut` has none, so "confirm this value" cannot be wired to `POST /v1/reports/{id}/results/{result_id}/confirm` yet. |
+
+## Reminders
+
+Every alert is time-based, so the phone schedules it itself with Android's
+`AlarmManager`. That is what makes them work with the app closed, with no
+signal and with the backend asleep — which is the whole point of doing them
+locally rather than with a push service.
+
+`GET /v1/alerts` says *what* and *when*, with quiet hours already applied
+server-side; `alert_schedule.dart` does the arithmetic (which calendar day, and
+a second check of quiet hours in case the window changed offline) and
+`notification_service.dart` hands the result to the plugin as daily repeating
+`zonedSchedule` alarms in the device's own time zone. Wall-clock, not elapsed
+time: a seven o'clock reminder is at seven o'clock on both sides of a
+daylight-saving change, and `test/services/alert_schedule_test.dart` proves it
+across a real spring-forward morning.
+
+Escalation alerts are never silenced — not by quiet hours and not by switching
+the type off. The server refuses to disable them and the device honours the same
+rule.
+
+Permission is requested **when there is a plan on screen with times on it**, not
+on first launch. Asking before somebody has any reason to want a reminder is how
+an app earns a permanent refusal.
+
+## Offline
+
+`sqflite` keeps three things: today's briefing, the latest report's summary line
+and the alert definitions. Anything served from it is labelled with
+`HpStaleNotice` — *"Saved on this phone — last updated 2 hours ago"* — and
+never presented as current.
+
+Two things are deliberately **not** cached:
+
+- **Escalations.** A red flag is a statement about somebody's health *now*.
+  Serving a stored one after a failed refresh would show a finding that may
+  already have been resolved and hide a new one nobody fetched. They are
+  stripped before the briefing is written, and the offline banner says plainly
+  that nothing new was checked.
+- **Report values.** The report screen is never answered from the cache at all.
+
 ## Known risks
 
 This code has never been compiled. CI is its first compiler, and these are the places to
@@ -236,3 +386,15 @@ look first if it goes red:
 4. **Bundled fonts** — seven static TrueType files verified by header and name table but
    never rendered. If text falls back to the system font, the fault is in the `fonts:`
    block of `pubspec.yaml`, not in the files.
+5. **`flutter_local_notifications` 18.0.1** — `zonedSchedule` in this version
+   still requires *both* `uiLocalNotificationDateInterpretation` and
+   `androidScheduleMode`. The former is only removed in 19.0.0. If the
+   constraint is ever relaxed past `^18`, that argument has to go.
+6. **`supabase_flutter` 2.8** — `auth_service.dart` deliberately leans on type
+   inference around `onAuthStateChange` and `currentSession` so that a renamed
+   type in a patch release is not a compile error here.
+7. **`supabase_flutter`'s `anonKey`** — `^2.8.0` resolves to the newest 2.x,
+   and later 2.x releases mark `Supabase.initialize(anonKey:)` deprecated in
+   favour of `publishableKey`. It still exists and still works, so this is an
+   analyzer *info* rather than a failure (`flutter analyze --no-fatal-infos`).
+   If it is ever removed, `core/bootstrap.dart` is the only place to change.

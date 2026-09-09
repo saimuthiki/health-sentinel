@@ -8,6 +8,7 @@ import '../../core/theme/hp_typography.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/models/models.dart';
 import '../../data/providers.dart';
+import '../common/failure_copy.dart';
 
 /// Today's plan, meal by meal, with the reason each thing is there.
 ///
@@ -35,8 +36,11 @@ class PlanScreen extends ConsumerWidget {
                 ),
                 error: (Object error, StackTrace stack) => HpErrorState(
                   title: 'The plan could not be loaded',
-                  body: 'The app could not reach the health engine. Yesterday’s '
-                      'plan is still in Today.',
+                  body: explainFailure(
+                    error,
+                    fallback: 'The app could not reach the health engine. '
+                        'Yesterday’s plan is still in Today.',
+                  ),
                   onRetry: () => ref.invalidate(planProvider),
                 ),
                 data: (MealPlan data) => _Body(plan: data),

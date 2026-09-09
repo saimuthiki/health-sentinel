@@ -8,8 +8,11 @@ import '../../core/theme/hp_severity.dart';
 import '../../core/theme/hp_spacing.dart';
 import '../../core/theme/hp_typography.dart';
 import '../../core/widgets/widgets.dart';
+import '../../data/api/api_status.dart';
 import '../../data/models/models.dart';
 import '../../data/providers.dart';
+import '../../data/repository/health_repository.dart';
+import '../common/failure_copy.dart';
 import '../common/severity_ui.dart';
 
 /// The screen people open every morning.
@@ -25,6 +28,20 @@ class TodayScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final AsyncValue<TodayBriefing> today = ref.watch(todayProvider);
+    final ApiPhase phase = ref.watch(apiPhaseProvider);
+
+    // The moment reminders start making sense: there is a day on screen with
+    // times on it. This is where the notification permission is asked for, not
+    // on first launch, when the answer would only ever be "not now".
+    ref.listen<AsyncValue<TodayBriefing>>(
+      todayProvider,
+      (AsyncValue<TodayBriefing>? previous, AsyncValue<TodayBriefing> next) {
+        final TodayBriefing? briefing = next.value;
+        if (briefing != null && briefing.meals.isNotEmpty) {
+          ref.read(scheduledRemindersProvider);
+        }
+      },
+    );
 
     return Scaffold(
       body: SafeArea(
@@ -33,14 +50,26 @@ class TodayScreen extends ConsumerWidget {
           children: <Widget>[
             Expanded(
               child: today.when(
-                loading: () => const HpLoadingState(
-                  message: 'Getting your day ready',
-                  detail: 'This can take a moment on the first open.',
+                // The free hosting tier stops the backend when nobody is using
+                // it and the first request of the day wakes it, which takes the
+                // better part of a minute. Saying so is the difference between
+                // "slow this morning" and "broken".
+                loading: () => HpLoadingState(
+                  message: phase.waitingMessage,
+                  detail: phase.waitingDetail ??
+                      'This can take a moment on the first open.',
                 ),
+                // The sentence comes from the error mapper, so a refused
+                // consent or an expired sign-in says so instead of every
+                // failure reading as "no signal". It is still our copy: no
+                // server string reaches this screen.
                 error: (Object error, StackTrace stack) => HpErrorState(
                   title: 'Today could not be loaded',
-                  body: 'You are seeing this because the app could not reach '
-                      'the health engine. Your data is safe.',
+                  body: explainFailure(
+                    error,
+                    fallback: 'The app could not reach the health engine. '
+                        'Your data is safe.',
+                  ),
                   onRetry: () => ref.invalidate(todayProvider),
                 ),
                 data: (TodayBriefing briefing) =>
@@ -66,6 +95,10 @@ class _TodayBody extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final HpPalette p = context.hp;
     final DateTime now = DateTime.now();
+    final HealthRepository repository = ref.watch(healthRepositoryProvider);
+    final DateTime? cachedAt = repository is CacheAware
+        ? repository.servedFromCacheAt(CacheAware.cacheSubjectToday)
+        : null;
 
     return RefreshIndicator(
       onRefresh: () async => ref.invalidate(todayProvider),
@@ -88,7 +121,8 @@ class _TodayBody extends ConsumerWidget {
           ),
           const SizedBox(height: HpSpacing.xxl),
 
-          // An urgent finding sits above everything, including the day itself.
+          // An urgent finding sits above everything, including the day itself,
+          // and there is no way to put it away.
           for (final EscalationNotice notice in briefing.escalations) ...<Widget>[
             HpEscalationCard(
               title: notice.title,
@@ -96,6 +130,18 @@ class _TodayBody extends ConsumerWidget {
               steps: notice.steps,
               footnote: notice.sourceCitation,
               onFindCare: () => _showCareSheet(context),
+            ),
+            const SizedBox(height: HpSpacing.xxl),
+          ],
+
+          // Below the escalations, never above them: if this day came off the
+          // phone rather than off the network, say so and say what is missing
+          // as a result. Nothing cached is ever shown as though it were current.
+          if (cachedAt != null) ...<Widget>[
+            HpStaleNotice(
+              storedAt: cachedAt,
+              detail: 'You are offline, so nothing new was checked \u2014 '
+                  'including anything that would need a doctor.',
             ),
             const SizedBox(height: HpSpacing.xxl),
           ],

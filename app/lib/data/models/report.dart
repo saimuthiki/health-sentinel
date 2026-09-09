@@ -1,5 +1,6 @@
 import 'enums.dart';
 import 'json.dart';
+import 'today.dart';
 
 /// `lab_results`, joined with the `biomarkers` reference table for the display
 /// name and with the report summary for the plain-language line.
@@ -16,6 +17,7 @@ class LabResult {
     required this.unit,
     required this.status,
     this.value,
+    this.valueText,
     this.reportId,
     this.printedRange,
     this.refLow,
@@ -33,6 +35,15 @@ class LabResult {
 
   /// Null when the lab printed something we could not read. Never guessed.
   final double? value;
+
+  /// The value **exactly as the backend sent it**, digit for digit.
+  ///
+  /// The API returns lab values as strings on purpose, and this field keeps them
+  /// that way. Parsing "0.45" into a double and printing it back through a
+  /// formatter is how a value silently becomes "0.5" on the way to the screen,
+  /// and a lab number the app rounded is a lab number the app made up. [value]
+  /// stays for charts and comparisons; [valueLabel] shows this.
+  final String? valueText;
 
   final String unit;
   final LabStatus status;
@@ -61,6 +72,14 @@ class LabResult {
       status != LabStatus.normal && status != LabStatus.needsReview;
 
   String get valueLabel {
+    final String? exact = valueText;
+    if (exact != null && exact.trim().isNotEmpty) {
+      final String shown = exact.trim();
+      return unit.isEmpty ? shown : '$shown $unit';
+    }
+    // Reached only when neither a textual value nor a raw `value` was stored --
+    // a chart-only row. A lab figure that exists is shown as the lab printed it,
+    // never re-rounded by us.
     final double? v = value;
     if (v == null) {
       return '--';
@@ -75,6 +94,13 @@ class LabResult {
         biomarkerCode: asString(json['biomarker_code']),
         displayName: asString(json['display_name']),
         value: asDoubleOrNull(json['value']),
+        // This is the cache path: toJson writes value_text, so it is normally
+        // present. The fallback to `value` covers a row written by an older build
+        // that stored no value_text -- taking the string verbatim rather than the
+        // double parsed from it, because a lab figure is shown as the lab printed
+        // it. (The live API path is Wire.labResultFrom, which already does this;
+        // ResultOut.value is a str on the backend for exactly this reason.)
+        valueText: asStringOrNull(json['value_text']) ?? asStringOrNull(json['value']),
         unit: asString(json['unit']),
         status: LabStatus.fromWire(json['status']),
         reportId: asStringOrNull(json['report_id']),
@@ -93,6 +119,7 @@ class LabResult {
         'biomarker_code': biomarkerCode,
         'display_name': displayName,
         'value': value,
+        'value_text': valueText,
         'unit': unit,
         'status': status.wire,
         'report_id': reportId,
@@ -122,6 +149,7 @@ class HealthReport {
     this.keepOriginalUntil,
     this.headline,
     this.results = const <LabResult>[],
+    this.escalations = const <EscalationNotice>[],
   });
 
   final String id;
@@ -143,6 +171,17 @@ class HealthReport {
 
   final List<LabResult> results;
 
+  /// Red flags the backend's deterministic rules raised over these results.
+  ///
+  /// They are carried on the report rather than fetched separately because the
+  /// escalation card has to be on screen *before* any value is, and a second
+  /// request would let the values render first. Sorted most urgent first by the
+  /// mapper; the screen renders them in order, above everything else, with no
+  /// way to dismiss one.
+  final List<EscalationNotice> escalations;
+
+  bool get hasEscalation => escalations.isNotEmpty;
+
   int get outsideRangeCount =>
       results.where((LabResult r) => r.isOutsideRange).length;
 
@@ -162,6 +201,9 @@ class HealthReport {
         keepOriginalUntil: asDate(json['keep_original_until']),
         headline: asStringOrNull(json['headline']),
         results: asMapList(json['results']).map(LabResult.fromJson).toList(),
+        escalations: asMapList(json['escalations'])
+            .map(EscalationNotice.fromJson)
+            .toList(),
       );
 
   Map<String, dynamic> toJson() => prune(<String, dynamic>{
@@ -177,6 +219,8 @@ class HealthReport {
         'keep_original_until': dateToJson(keepOriginalUntil),
         'headline': headline,
         'results': results.map((LabResult r) => r.toJson()).toList(),
+        'escalations':
+            escalations.map((EscalationNotice e) => e.toJson()).toList(),
       });
 }
 

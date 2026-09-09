@@ -10,6 +10,7 @@ import '../../features/plan/plan_screen.dart';
 import '../../features/profile/health_profile_screen.dart';
 import '../../features/reports/report_detail_screen.dart';
 import '../../features/reports/reports_screen.dart';
+import '../../features/setup/not_configured_screen.dart';
 import '../../features/shell/home_shell.dart';
 import '../../features/splash/splash_screen.dart';
 import '../../features/today/today_screen.dart';
@@ -36,6 +37,14 @@ GoRouter buildAppRouter() {
         path: '/',
         builder: (BuildContext context, GoRouterState state) =>
             const SplashScreen(),
+      ),
+      GoRoute(
+        // Where the splash sends someone when this build has no backend to
+        // talk to. A real destination rather than a dialog, so it survives a
+        // rotation and can be linked to from a bug report.
+        path: '/not-configured',
+        builder: (BuildContext context, GoRouterState state) =>
+            const NotConfiguredScreen(),
       ),
       GoRoute(
         path: '/welcome',

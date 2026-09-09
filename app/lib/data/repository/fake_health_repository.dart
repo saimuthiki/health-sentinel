@@ -1,3 +1,6 @@
+import 'dart:typed_data';
+
+import '../../services/alert_schedule.dart';
 import '../models/models.dart';
 import 'health_repository.dart';
 
@@ -255,7 +258,56 @@ class FakeHealthRepository implements HealthRepository {
     return _settle(_hydrationMl);
   }
 
+  @override
+  Future<AlertPlan> loadAlerts() => _settle(_sampleAlerts);
+
+  @override
+  Future<HealthReport> uploadReport({
+    required String fileName,
+    required String mimeType,
+    required Uint8List bytes,
+    void Function(int sent, int total)? onProgress,
+  }) async {
+    // The fake still drives the progress callback, so the upload screen can be
+    // built and tested without a network: nought, half, all.
+    onProgress?.call(0, bytes.length);
+    onProgress?.call(bytes.length ~/ 2, bytes.length);
+    onProgress?.call(bytes.length, bytes.length);
+    return _settle(_sampleReports.first);
+  }
+
   // -------------------------------------------------------------- sample data
+
+  static const AlertPlan _sampleAlerts = AlertPlan(
+    alerts: <AlertDefinition>[
+      AlertDefinition(
+        alertType: 'meal',
+        title: 'Breakfast time',
+        body: 'Today\u2019s breakfast is ready in your plan.',
+        at: '08:20',
+      ),
+      AlertDefinition(
+        alertType: 'hydration',
+        title: 'Water',
+        body: 'Time for a glass of water.',
+        at: '11:00',
+      ),
+      AlertDefinition(
+        alertType: 'sleep',
+        title: 'Wind down',
+        body: 'Screens off soon \u2014 you sleep better when the last hour is '
+            'quiet.',
+        at: '21:45',
+      ),
+      AlertDefinition(
+        alertType: 'hydration',
+        title: 'Water',
+        body: 'Time for a glass of water.',
+        at: '23:30',
+      ),
+    ],
+    quietHours: QuietHours(start: '22:30', end: '06:00'),
+  );
 
   static final List<MealPlanItem> _sampleMeals = <MealPlanItem>[
     const MealPlanItem(

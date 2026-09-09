@@ -8,6 +8,7 @@ import '../../core/theme/hp_typography.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/models/models.dart';
 import '../../data/providers.dart';
+import '../common/failure_copy.dart';
 
 /// Where symptoms, questions and "I had two idlis" go.
 ///
@@ -67,8 +68,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     const HpLoadingState(message: 'Loading your conversation'),
                 error: (Object error, StackTrace stack) => HpErrorState(
                   title: 'Chat is unavailable',
-                  body: 'The app could not reach the health engine. Your '
-                      'messages are safe.',
+                  body: explainFailure(
+                    error,
+                    fallback: 'The app could not reach the health engine. '
+                        'Your messages are safe.',
+                  ),
                   onRetry: () => ref.invalidate(messagesProvider),
                 ),
                 data: (List<ChatMessage> list) {

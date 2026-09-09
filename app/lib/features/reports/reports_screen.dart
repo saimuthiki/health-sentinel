@@ -10,6 +10,7 @@ import '../../core/theme/hp_typography.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/models/models.dart';
 import '../../data/providers.dart';
+import '../common/failure_copy.dart';
 import '../common/severity_ui.dart';
 import 'trend_sparkline.dart';
 
@@ -46,8 +47,11 @@ class ReportsScreen extends ConsumerWidget {
                 ),
                 error: (Object error, StackTrace stack) => HpErrorState(
                   title: 'Reports could not be loaded',
-                  body: 'The app could not reach the health engine. Nothing has '
-                      'been lost.',
+                  body: explainFailure(
+                    error,
+                    fallback: 'The app could not reach the health engine. '
+                        'Nothing has been lost.',
+                  ),
                   onRetry: () => ref.invalidate(reportsProvider),
                 ),
                 data: (List<HealthReport> list) {

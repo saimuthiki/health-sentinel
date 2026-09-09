@@ -6,6 +6,7 @@ export 'hp_form.dart';
 export 'hp_mark.dart';
 export 'hp_meter.dart';
 export 'hp_section_header.dart';
+export 'hp_stale_notice.dart';
 export 'hp_states.dart';
 export 'hp_status_chip.dart';
 export 'hp_timeline.dart';
