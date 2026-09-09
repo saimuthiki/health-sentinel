@@ -1,5 +1,7 @@
 -- ============================================================================
 -- 203_rda_targets.sql
+-- Energy is stored as 'kcal' to match foods.per_100g. One spelling across the
+-- whole system, so gap arithmetic cannot silently miss it.
 -- HealthPulse seed - daily nutrient targets for Indian adults
 --
 -- Run AFTER the migrations. Safe to run more than once.
@@ -35,17 +37,17 @@ insert into public.rda_targets
 values
 
 -- ------------------------------------------------------------------ energy --
-('energy_kcal', 'male',   19, 59, 'sedentary', 2110, 'kcal', 'ICMR-NIN 2020',
+('kcal',        'male',   19, 59, 'sedentary', 2110, 'kcal', 'ICMR-NIN 2020',
  'ICMR-NIN, Nutrient Requirements for Indians 2020: reference adult man (65 kg), sedentary work, 2110 kcal/day.'),
-('energy_kcal', 'male',   19, 59, 'moderate',  2710, 'kcal', 'ICMR-NIN 2020',
+('kcal',        'male',   19, 59, 'moderate',  2710, 'kcal', 'ICMR-NIN 2020',
  'ICMR-NIN, Nutrient Requirements for Indians 2020: reference adult man (65 kg), moderate work, 2710 kcal/day.'),
-('energy_kcal', 'male',   19, 59, 'heavy',     3470, 'kcal', 'ICMR-NIN 2020',
+('kcal',        'male',   19, 59, 'heavy',     3470, 'kcal', 'ICMR-NIN 2020',
  'ICMR-NIN, Nutrient Requirements for Indians 2020: reference adult man (65 kg), heavy work, 3470 kcal/day.'),
-('energy_kcal', 'female', 19, 59, 'sedentary', 1660, 'kcal', 'ICMR-NIN 2020',
+('kcal',        'female', 19, 59, 'sedentary', 1660, 'kcal', 'ICMR-NIN 2020',
  'ICMR-NIN, Nutrient Requirements for Indians 2020: reference adult woman (55 kg), sedentary work, 1660 kcal/day.'),
-('energy_kcal', 'female', 19, 59, 'moderate',  2130, 'kcal', 'ICMR-NIN 2020',
+('kcal',        'female', 19, 59, 'moderate',  2130, 'kcal', 'ICMR-NIN 2020',
  'ICMR-NIN, Nutrient Requirements for Indians 2020: reference adult woman (55 kg), moderate work, 2130 kcal/day.'),
-('energy_kcal', 'female', 19, 59, 'heavy',     2720, 'kcal', 'ICMR-NIN 2020',
+('kcal',        'female', 19, 59, 'heavy',     2720, 'kcal', 'ICMR-NIN 2020',
  'ICMR-NIN, Nutrient Requirements for Indians 2020: reference adult woman (55 kg), heavy work, 2720 kcal/day.'),
 
 -- ----------------------------------------------------------------- protein --

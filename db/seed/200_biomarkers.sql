@@ -33,6 +33,10 @@ values
   ('MCHC', 'Mean Corpuscular Haemoglobin Concentration', 'haematology', 'g/dL', null),
   ('RDW', 'Red Cell Distribution Width', 'haematology', '%', true),
   ('NEUT_PCT', 'Neutrophils', 'haematology', '%', null),
+  -- Absolute neutrophil count, not the percentage. The neutropenia red-flag rule
+  -- in backend/app/rules/red_flags.py fires below 500 cells/uL and can only ever
+  -- fire on an absolute count, so this code must exist for that rule to be live.
+  ('NEUTROPHILS_ABS', 'Absolute Neutrophil Count', 'haematology', 'cells/uL', false),
   ('LYMPH_PCT', 'Lymphocytes', 'haematology', '%', null),
   ('MONO_PCT', 'Monocytes', 'haematology', '%', null),
   ('EOS_PCT', 'Eosinophils', 'haematology', '%', true),
@@ -98,6 +102,8 @@ values
   ('CALCIUM_IONIZED', 'Ionised Calcium', 'mineral', 'mg/dL', null),
   ('PHOSPHORUS', 'Serum Phosphorus', 'mineral', 'mg/dL', null),
   ('MAGNESIUM', 'Serum Magnesium', 'mineral', 'mg/dL', null),
+  -- Referenced by the biomarker-to-nutrient map in backend/app/nutrition/gaps.py.
+  ('ZINC', 'Serum Zinc', 'mineral', 'ug/dL', false),
   -- electrolyte
   ('SODIUM', 'Serum Sodium', 'electrolyte', 'mmol/L', null),
   ('POTASSIUM', 'Serum Potassium', 'electrolyte', 'mmol/L', null),
@@ -123,5 +129,5 @@ values
   ('PROLACTIN', 'Prolactin', 'hormone', 'ng/mL', true)
 on conflict (code) do nothing;
 
--- Check: this must print 82.
+-- Check: this must print 84.
 select count(*) as biomarkers_loaded from public.biomarkers;

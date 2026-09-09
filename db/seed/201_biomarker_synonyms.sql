@@ -463,6 +463,25 @@ values
   ('prl', 'PROLACTIN', 'common')
 on conflict (synonym) do nothing;
 
+-- ---------------------------------------------------------------------------
+-- Absolute neutrophil count and serum zinc. Added alongside the codes in
+-- 200_biomarkers.sql; without these a report printing "ANC" would never reach
+-- the neutropenia red-flag rule.
+-- ---------------------------------------------------------------------------
+insert into public.biomarker_synonyms (synonym, biomarker_code, source) values
+  ('absolute neutrophil count', 'NEUTROPHILS_ABS', 'common'),
+  ('anc', 'NEUTROPHILS_ABS', 'common'),
+  ('neutrophil absolute count', 'NEUTROPHILS_ABS', 'indian_lab'),
+  ('absolute neutrophils', 'NEUTROPHILS_ABS', 'common'),
+  ('neutrophils absolute', 'NEUTROPHILS_ABS', 'indian_lab'),
+  ('neutrophil count absolute', 'NEUTROPHILS_ABS', 'indian_lab'),
+  ('serum zinc', 'ZINC', 'common'),
+  ('zinc', 'ZINC', 'common'),
+  ('zinc serum', 'ZINC', 'indian_lab'),
+  ('zn', 'ZINC', 'common')
+on conflict (synonym) do nothing;
+
+
 -- Check: this must print 353.
 select count(*) as synonyms_loaded from public.biomarker_synonyms;
 
