@@ -1,0 +1,763 @@
+-- ============================================================================
+-- 100_rls.sql
+-- HealthPulse - Row Level Security for every table
+-- Target: PostgreSQL 15 (Supabase)
+--
+-- Run AFTER all eight migration files. Safe to run more than once.
+--
+-- The rule (CLAUDE.md): isolation is enforced by the database, not by
+-- application code. If the backend has a bug, Postgres still refuses to hand
+-- one user another user's row.
+--
+-- Three shapes of table:
+--
+--   1. DIRECTLY OWNED   - has a user_id column.
+--                         Policy: auth.uid() = user_id
+--
+--   2. INDIRECTLY OWNED - no user_id (or a user_id that must agree with its
+--                         parent). Policy walks up to the owning row with an
+--                         EXISTS subquery.
+--
+--   3. REFERENCE        - shared catalogue data. RLS is ON with a SELECT-only
+--                         policy for logged-in users and NO write policy at
+--                         all, so nothing but the service role can change it.
+--                         (The service role has BYPASSRLS.)
+--
+-- Every policy is written for the `authenticated` role only. `anon` gets
+-- nothing: there is no anonymous health data.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- Table privileges. Supabase's default privileges usually cover this already;
+-- granting explicitly means the file also works on a plain Postgres server.
+-- RLS is what actually restricts the rows - GRANT only opens the door.
+-- ---------------------------------------------------------------------------
+do $$
+begin
+  if exists (select 1 from pg_roles where rolname = 'authenticated') then
+    execute 'grant usage on schema public to authenticated';
+    execute 'grant select, insert, update, delete on all tables in schema public to authenticated';
+    execute 'grant usage, select on all sequences in schema public to authenticated';
+  end if;
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    execute 'grant usage on schema public to service_role';
+    execute 'grant all on all tables in schema public to service_role';
+    execute 'grant all on all sequences in schema public to service_role';
+  end if;
+  -- Anonymous users get nothing.
+  if exists (select 1 from pg_roles where rolname = 'anon') then
+    execute 'revoke all on all tables in schema public from anon';
+  end if;
+end
+$$;
+
+
+-- ###########################################################################
+-- 1. DIRECTLY OWNED TABLES  (auth.uid() = user_id)
+-- ###########################################################################
+
+-- ---------------------------------------------------------------- profiles --
+alter table public.profiles enable row level security;
+alter table public.profiles force row level security;
+
+drop policy if exists profiles_select on public.profiles;
+create policy profiles_select on public.profiles
+  for select to authenticated
+  using (auth.uid() = user_id);
+
+drop policy if exists profiles_insert on public.profiles;
+create policy profiles_insert on public.profiles
+  for insert to authenticated
+  with check (auth.uid() = user_id);
+
+drop policy if exists profiles_update on public.profiles;
+create policy profiles_update on public.profiles
+  for update to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+drop policy if exists profiles_delete on public.profiles;
+create policy profiles_delete on public.profiles
+  for delete to authenticated
+  using (auth.uid() = user_id);
+
+-- --------------------------------------------------------- health_profiles --
+alter table public.health_profiles enable row level security;
+alter table public.health_profiles force row level security;
+
+drop policy if exists health_profiles_select on public.health_profiles;
+create policy health_profiles_select on public.health_profiles
+  for select to authenticated using (auth.uid() = user_id);
+drop policy if exists health_profiles_insert on public.health_profiles;
+create policy health_profiles_insert on public.health_profiles
+  for insert to authenticated with check (auth.uid() = user_id);
+drop policy if exists health_profiles_update on public.health_profiles;
+create policy health_profiles_update on public.health_profiles
+  for update to authenticated using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+drop policy if exists health_profiles_delete on public.health_profiles;
+create policy health_profiles_delete on public.health_profiles
+  for delete to authenticated using (auth.uid() = user_id);
+
+-- --------------------------------------------------------------- allergies --
+alter table public.allergies enable row level security;
+alter table public.allergies force row level security;
+
+drop policy if exists allergies_select on public.allergies;
+create policy allergies_select on public.allergies
+  for select to authenticated using (auth.uid() = user_id);
+drop policy if exists allergies_insert on public.allergies;
+create policy allergies_insert on public.allergies
+  for insert to authenticated with check (auth.uid() = user_id);
+drop policy if exists allergies_update on public.allergies;
+create policy allergies_update on public.allergies
+  for update to authenticated using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+drop policy if exists allergies_delete on public.allergies;
+create policy allergies_delete on public.allergies
+  for delete to authenticated using (auth.uid() = user_id);
+
+-- ---------------------------------------------------------------- consents --
+-- Consent receipts are evidence. Users may read and create them; there is no
+-- UPDATE or DELETE policy, so a receipt cannot be altered or erased from the
+-- app. (Account deletion runs as the service role, which bypasses RLS.)
+alter table public.consents enable row level security;
+alter table public.consents force row level security;
+
+drop policy if exists consents_select on public.consents;
+create policy consents_select on public.consents
+  for select to authenticated using (auth.uid() = user_id);
+drop policy if exists consents_insert on public.consents;
+create policy consents_insert on public.consents
+  for insert to authenticated with check (auth.uid() = user_id);
+
+-- ----------------------------------------------------------------- reports --
+alter table public.reports enable row level security;
+alter table public.reports force row level security;
+
+drop policy if exists reports_select on public.reports;
+create policy reports_select on public.reports
+  for select to authenticated using (auth.uid() = user_id);
+drop policy if exists reports_insert on public.reports;
+create policy reports_insert on public.reports
+  for insert to authenticated with check (auth.uid() = user_id);
+drop policy if exists reports_update on public.reports;
+create policy reports_update on public.reports
+  for update to authenticated using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+drop policy if exists reports_delete on public.reports;
+create policy reports_delete on public.reports
+  for delete to authenticated using (auth.uid() = user_id);
+
+-- ------------------------------------------------------------- lab_results --
+alter table public.lab_results enable row level security;
+alter table public.lab_results force row level security;
+
+drop policy if exists lab_results_select on public.lab_results;
+create policy lab_results_select on public.lab_results
+  for select to authenticated using (auth.uid() = user_id);
+drop policy if exists lab_results_insert on public.lab_results;
+create policy lab_results_insert on public.lab_results
+  for insert to authenticated with check (auth.uid() = user_id);
+drop policy if exists lab_results_update on public.lab_results;
+create policy lab_results_update on public.lab_results
+  for update to authenticated using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+drop policy if exists lab_results_delete on public.lab_results;
+create policy lab_results_delete on public.lab_results
+  for delete to authenticated using (auth.uid() = user_id);
+
+-- ---------------------------------------------------------------- symptoms --
+alter table public.symptoms enable row level security;
+alter table public.symptoms force row level security;
+
+drop policy if exists symptoms_select on public.symptoms;
+create policy symptoms_select on public.symptoms
+  for select to authenticated using (auth.uid() = user_id);
+drop policy if exists symptoms_insert on public.symptoms;
+create policy symptoms_insert on public.symptoms
+  for insert to authenticated with check (auth.uid() = user_id);
+drop policy if exists symptoms_update on public.symptoms;
+create policy symptoms_update on public.symptoms
+  for update to authenticated using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+drop policy if exists symptoms_delete on public.symptoms;
+create policy symptoms_delete on public.symptoms
+  for delete to authenticated using (auth.uid() = user_id);
+
+-- ------------------------------------------------------------------- goals --
+alter table public.goals enable row level security;
+alter table public.goals force row level security;
+
+drop policy if exists goals_select on public.goals;
+create policy goals_select on public.goals
+  for select to authenticated using (auth.uid() = user_id);
+drop policy if exists goals_insert on public.goals;
+create policy goals_insert on public.goals
+  for insert to authenticated with check (auth.uid() = user_id);
+drop policy if exists goals_update on public.goals;
+create policy goals_update on public.goals
+  for update to authenticated using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+drop policy if exists goals_delete on public.goals;
+create policy goals_delete on public.goals
+  for delete to authenticated using (auth.uid() = user_id);
+
+-- ------------------------------------------------------------- user_memory --
+alter table public.user_memory enable row level security;
+alter table public.user_memory force row level security;
+
+drop policy if exists user_memory_select on public.user_memory;
+create policy user_memory_select on public.user_memory
+  for select to authenticated using (auth.uid() = user_id);
+drop policy if exists user_memory_insert on public.user_memory;
+create policy user_memory_insert on public.user_memory
+  for insert to authenticated with check (auth.uid() = user_id);
+drop policy if exists user_memory_update on public.user_memory;
+create policy user_memory_update on public.user_memory
+  for update to authenticated using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+drop policy if exists user_memory_delete on public.user_memory;
+create policy user_memory_delete on public.user_memory
+  for delete to authenticated using (auth.uid() = user_id);
+
+-- -------------------------------------------------------- food_preferences --
+alter table public.food_preferences enable row level security;
+alter table public.food_preferences force row level security;
+
+drop policy if exists food_preferences_select on public.food_preferences;
+create policy food_preferences_select on public.food_preferences
+  for select to authenticated using (auth.uid() = user_id);
+drop policy if exists food_preferences_insert on public.food_preferences;
+create policy food_preferences_insert on public.food_preferences
+  for insert to authenticated with check (auth.uid() = user_id);
+drop policy if exists food_preferences_update on public.food_preferences;
+create policy food_preferences_update on public.food_preferences
+  for update to authenticated using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+drop policy if exists food_preferences_delete on public.food_preferences;
+create policy food_preferences_delete on public.food_preferences
+  for delete to authenticated using (auth.uid() = user_id);
+
+-- --------------------------------------------------------------- food_logs --
+alter table public.food_logs enable row level security;
+alter table public.food_logs force row level security;
+
+drop policy if exists food_logs_select on public.food_logs;
+create policy food_logs_select on public.food_logs
+  for select to authenticated using (auth.uid() = user_id);
+drop policy if exists food_logs_insert on public.food_logs;
+create policy food_logs_insert on public.food_logs
+  for insert to authenticated with check (auth.uid() = user_id);
+drop policy if exists food_logs_update on public.food_logs;
+create policy food_logs_update on public.food_logs
+  for update to authenticated using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+drop policy if exists food_logs_delete on public.food_logs;
+create policy food_logs_delete on public.food_logs
+  for delete to authenticated using (auth.uid() = user_id);
+
+-- -------------------------------------------------------------- meal_plans --
+alter table public.meal_plans enable row level security;
+alter table public.meal_plans force row level security;
+
+drop policy if exists meal_plans_select on public.meal_plans;
+create policy meal_plans_select on public.meal_plans
+  for select to authenticated using (auth.uid() = user_id);
+drop policy if exists meal_plans_insert on public.meal_plans;
+create policy meal_plans_insert on public.meal_plans
+  for insert to authenticated with check (auth.uid() = user_id);
+drop policy if exists meal_plans_update on public.meal_plans;
+create policy meal_plans_update on public.meal_plans
+  for update to authenticated using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+drop policy if exists meal_plans_delete on public.meal_plans;
+create policy meal_plans_delete on public.meal_plans
+  for delete to authenticated using (auth.uid() = user_id);
+
+-- ----------------------------------------------------------- grocery_lists --
+alter table public.grocery_lists enable row level security;
+alter table public.grocery_lists force row level security;
+
+drop policy if exists grocery_lists_select on public.grocery_lists;
+create policy grocery_lists_select on public.grocery_lists
+  for select to authenticated using (auth.uid() = user_id);
+drop policy if exists grocery_lists_insert on public.grocery_lists;
+create policy grocery_lists_insert on public.grocery_lists
+  for insert to authenticated with check (auth.uid() = user_id);
+drop policy if exists grocery_lists_update on public.grocery_lists;
+create policy grocery_lists_update on public.grocery_lists
+  for update to authenticated using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+drop policy if exists grocery_lists_delete on public.grocery_lists;
+create policy grocery_lists_delete on public.grocery_lists
+  for delete to authenticated using (auth.uid() = user_id);
+
+-- ------------------------------------------------------------ pantry_items --
+alter table public.pantry_items enable row level security;
+alter table public.pantry_items force row level security;
+
+drop policy if exists pantry_items_select on public.pantry_items;
+create policy pantry_items_select on public.pantry_items
+  for select to authenticated using (auth.uid() = user_id);
+drop policy if exists pantry_items_insert on public.pantry_items;
+create policy pantry_items_insert on public.pantry_items
+  for insert to authenticated with check (auth.uid() = user_id);
+drop policy if exists pantry_items_update on public.pantry_items;
+create policy pantry_items_update on public.pantry_items
+  for update to authenticated using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+drop policy if exists pantry_items_delete on public.pantry_items;
+create policy pantry_items_delete on public.pantry_items
+  for delete to authenticated using (auth.uid() = user_id);
+
+-- ------------------------------------------------------------------ alerts --
+alter table public.alerts enable row level security;
+alter table public.alerts force row level security;
+
+drop policy if exists alerts_select on public.alerts;
+create policy alerts_select on public.alerts
+  for select to authenticated using (auth.uid() = user_id);
+drop policy if exists alerts_insert on public.alerts;
+create policy alerts_insert on public.alerts
+  for insert to authenticated with check (auth.uid() = user_id);
+drop policy if exists alerts_update on public.alerts;
+create policy alerts_update on public.alerts
+  for update to authenticated using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+drop policy if exists alerts_delete on public.alerts;
+create policy alerts_delete on public.alerts
+  for delete to authenticated using (auth.uid() = user_id);
+
+-- ------------------------------------------------------------ chat_threads --
+alter table public.chat_threads enable row level security;
+alter table public.chat_threads force row level security;
+
+drop policy if exists chat_threads_select on public.chat_threads;
+create policy chat_threads_select on public.chat_threads
+  for select to authenticated using (auth.uid() = user_id);
+drop policy if exists chat_threads_insert on public.chat_threads;
+create policy chat_threads_insert on public.chat_threads
+  for insert to authenticated with check (auth.uid() = user_id);
+drop policy if exists chat_threads_update on public.chat_threads;
+create policy chat_threads_update on public.chat_threads
+  for update to authenticated using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+drop policy if exists chat_threads_delete on public.chat_threads;
+create policy chat_threads_delete on public.chat_threads
+  for delete to authenticated using (auth.uid() = user_id);
+
+-- ------------------------------------------------------- weekly_summaries --
+alter table public.weekly_summaries enable row level security;
+alter table public.weekly_summaries force row level security;
+
+drop policy if exists weekly_summaries_select on public.weekly_summaries;
+create policy weekly_summaries_select on public.weekly_summaries
+  for select to authenticated using (auth.uid() = user_id);
+drop policy if exists weekly_summaries_insert on public.weekly_summaries;
+create policy weekly_summaries_insert on public.weekly_summaries
+  for insert to authenticated with check (auth.uid() = user_id);
+drop policy if exists weekly_summaries_update on public.weekly_summaries;
+create policy weekly_summaries_update on public.weekly_summaries
+  for update to authenticated using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+drop policy if exists weekly_summaries_delete on public.weekly_summaries;
+create policy weekly_summaries_delete on public.weekly_summaries
+  for delete to authenticated using (auth.uid() = user_id);
+
+-- ------------------------------------------------------- deletion_requests --
+-- Read + create only. A deletion receipt the user could edit or erase would be
+-- worthless as evidence.
+alter table public.deletion_requests enable row level security;
+alter table public.deletion_requests force row level security;
+
+drop policy if exists deletion_requests_select on public.deletion_requests;
+create policy deletion_requests_select on public.deletion_requests
+  for select to authenticated using (auth.uid() = user_id);
+drop policy if exists deletion_requests_insert on public.deletion_requests;
+create policy deletion_requests_insert on public.deletion_requests
+  for insert to authenticated with check (auth.uid() = user_id);
+
+-- ----------------------------------------------------------- health_events --
+-- APPEND-ONLY audit trail: select + insert, deliberately no update/delete.
+alter table public.health_events enable row level security;
+alter table public.health_events force row level security;
+
+drop policy if exists health_events_select on public.health_events;
+create policy health_events_select on public.health_events
+  for select to authenticated using (auth.uid() = user_id);
+drop policy if exists health_events_insert on public.health_events;
+create policy health_events_insert on public.health_events
+  for insert to authenticated with check (auth.uid() = user_id);
+
+-- ----------------------------------------------------------------- ai_runs --
+-- APPEND-ONLY cost/safety ledger: select + insert, deliberately no update/delete.
+alter table public.ai_runs enable row level security;
+alter table public.ai_runs force row level security;
+
+drop policy if exists ai_runs_select on public.ai_runs;
+create policy ai_runs_select on public.ai_runs
+  for select to authenticated using (auth.uid() = user_id);
+drop policy if exists ai_runs_insert on public.ai_runs;
+create policy ai_runs_insert on public.ai_runs
+  for insert to authenticated with check (auth.uid() = user_id);
+
+
+-- ###########################################################################
+-- 2. INDIRECTLY OWNED TABLES  (walk up to the owning row)
+--
+-- Each policy uses EXISTS against the parent table. Because the parent is also
+-- under RLS, this is a second, independent check - but the EXISTS is evaluated
+-- with the parent's own RLS applied too, so a user cannot reach a child row by
+-- guessing a parent id.
+-- ###########################################################################
+
+-- ------------------------------------------------------- report_extractions --
+-- Owner is reports.user_id.
+alter table public.report_extractions enable row level security;
+alter table public.report_extractions force row level security;
+
+drop policy if exists report_extractions_select on public.report_extractions;
+create policy report_extractions_select on public.report_extractions
+  for select to authenticated
+  using (exists (select 1 from public.reports r
+                 where r.id = report_extractions.report_id
+                   and r.user_id = auth.uid()));
+
+drop policy if exists report_extractions_insert on public.report_extractions;
+create policy report_extractions_insert on public.report_extractions
+  for insert to authenticated
+  with check (exists (select 1 from public.reports r
+                      where r.id = report_extractions.report_id
+                        and r.user_id = auth.uid()));
+
+drop policy if exists report_extractions_update on public.report_extractions;
+create policy report_extractions_update on public.report_extractions
+  for update to authenticated
+  using (exists (select 1 from public.reports r
+                 where r.id = report_extractions.report_id
+                   and r.user_id = auth.uid()))
+  with check (exists (select 1 from public.reports r
+                      where r.id = report_extractions.report_id
+                        and r.user_id = auth.uid()));
+
+drop policy if exists report_extractions_delete on public.report_extractions;
+create policy report_extractions_delete on public.report_extractions
+  for delete to authenticated
+  using (exists (select 1 from public.reports r
+                 where r.id = report_extractions.report_id
+                   and r.user_id = auth.uid()));
+
+-- ------------------------------------------------------- symptom_followups --
+-- Owner is symptoms.user_id.
+alter table public.symptom_followups enable row level security;
+alter table public.symptom_followups force row level security;
+
+drop policy if exists symptom_followups_select on public.symptom_followups;
+create policy symptom_followups_select on public.symptom_followups
+  for select to authenticated
+  using (exists (select 1 from public.symptoms s
+                 where s.id = symptom_followups.symptom_id
+                   and s.user_id = auth.uid()));
+
+drop policy if exists symptom_followups_insert on public.symptom_followups;
+create policy symptom_followups_insert on public.symptom_followups
+  for insert to authenticated
+  with check (exists (select 1 from public.symptoms s
+                      where s.id = symptom_followups.symptom_id
+                        and s.user_id = auth.uid()));
+
+drop policy if exists symptom_followups_update on public.symptom_followups;
+create policy symptom_followups_update on public.symptom_followups
+  for update to authenticated
+  using (exists (select 1 from public.symptoms s
+                 where s.id = symptom_followups.symptom_id
+                   and s.user_id = auth.uid()))
+  with check (exists (select 1 from public.symptoms s
+                      where s.id = symptom_followups.symptom_id
+                        and s.user_id = auth.uid()));
+
+drop policy if exists symptom_followups_delete on public.symptom_followups;
+create policy symptom_followups_delete on public.symptom_followups
+  for delete to authenticated
+  using (exists (select 1 from public.symptoms s
+                 where s.id = symptom_followups.symptom_id
+                   and s.user_id = auth.uid()));
+
+-- ----------------------------------------------------------- food_feedback --
+-- Has its own user_id AND a food_log_id. Both must agree, so a user cannot
+-- attach feedback to somebody else's meal even with a matching user_id.
+alter table public.food_feedback enable row level security;
+alter table public.food_feedback force row level security;
+
+drop policy if exists food_feedback_select on public.food_feedback;
+create policy food_feedback_select on public.food_feedback
+  for select to authenticated
+  using (auth.uid() = user_id
+         and exists (select 1 from public.food_logs fl
+                     where fl.id = food_feedback.food_log_id
+                       and fl.user_id = auth.uid()));
+
+drop policy if exists food_feedback_insert on public.food_feedback;
+create policy food_feedback_insert on public.food_feedback
+  for insert to authenticated
+  with check (auth.uid() = user_id
+              and exists (select 1 from public.food_logs fl
+                          where fl.id = food_feedback.food_log_id
+                            and fl.user_id = auth.uid()));
+
+drop policy if exists food_feedback_update on public.food_feedback;
+create policy food_feedback_update on public.food_feedback
+  for update to authenticated
+  using (auth.uid() = user_id
+         and exists (select 1 from public.food_logs fl
+                     where fl.id = food_feedback.food_log_id
+                       and fl.user_id = auth.uid()))
+  with check (auth.uid() = user_id
+              and exists (select 1 from public.food_logs fl
+                          where fl.id = food_feedback.food_log_id
+                            and fl.user_id = auth.uid()));
+
+drop policy if exists food_feedback_delete on public.food_feedback;
+create policy food_feedback_delete on public.food_feedback
+  for delete to authenticated
+  using (auth.uid() = user_id
+         and exists (select 1 from public.food_logs fl
+                     where fl.id = food_feedback.food_log_id
+                       and fl.user_id = auth.uid()));
+
+-- --------------------------------------------------------- meal_plan_items --
+-- Owner is meal_plans.user_id.
+alter table public.meal_plan_items enable row level security;
+alter table public.meal_plan_items force row level security;
+
+drop policy if exists meal_plan_items_select on public.meal_plan_items;
+create policy meal_plan_items_select on public.meal_plan_items
+  for select to authenticated
+  using (exists (select 1 from public.meal_plans mp
+                 where mp.id = meal_plan_items.meal_plan_id
+                   and mp.user_id = auth.uid()));
+
+drop policy if exists meal_plan_items_insert on public.meal_plan_items;
+create policy meal_plan_items_insert on public.meal_plan_items
+  for insert to authenticated
+  with check (exists (select 1 from public.meal_plans mp
+                      where mp.id = meal_plan_items.meal_plan_id
+                        and mp.user_id = auth.uid()));
+
+drop policy if exists meal_plan_items_update on public.meal_plan_items;
+create policy meal_plan_items_update on public.meal_plan_items
+  for update to authenticated
+  using (exists (select 1 from public.meal_plans mp
+                 where mp.id = meal_plan_items.meal_plan_id
+                   and mp.user_id = auth.uid()))
+  with check (exists (select 1 from public.meal_plans mp
+                      where mp.id = meal_plan_items.meal_plan_id
+                        and mp.user_id = auth.uid()));
+
+drop policy if exists meal_plan_items_delete on public.meal_plan_items;
+create policy meal_plan_items_delete on public.meal_plan_items
+  for delete to authenticated
+  using (exists (select 1 from public.meal_plans mp
+                 where mp.id = meal_plan_items.meal_plan_id
+                   and mp.user_id = auth.uid()));
+
+-- ----------------------------------------------------------- grocery_items --
+-- Owner is grocery_lists.user_id.
+alter table public.grocery_items enable row level security;
+alter table public.grocery_items force row level security;
+
+drop policy if exists grocery_items_select on public.grocery_items;
+create policy grocery_items_select on public.grocery_items
+  for select to authenticated
+  using (exists (select 1 from public.grocery_lists gl
+                 where gl.id = grocery_items.grocery_list_id
+                   and gl.user_id = auth.uid()));
+
+drop policy if exists grocery_items_insert on public.grocery_items;
+create policy grocery_items_insert on public.grocery_items
+  for insert to authenticated
+  with check (exists (select 1 from public.grocery_lists gl
+                      where gl.id = grocery_items.grocery_list_id
+                        and gl.user_id = auth.uid()));
+
+drop policy if exists grocery_items_update on public.grocery_items;
+create policy grocery_items_update on public.grocery_items
+  for update to authenticated
+  using (exists (select 1 from public.grocery_lists gl
+                 where gl.id = grocery_items.grocery_list_id
+                   and gl.user_id = auth.uid()))
+  with check (exists (select 1 from public.grocery_lists gl
+                      where gl.id = grocery_items.grocery_list_id
+                        and gl.user_id = auth.uid()));
+
+drop policy if exists grocery_items_delete on public.grocery_items;
+create policy grocery_items_delete on public.grocery_items
+  for delete to authenticated
+  using (exists (select 1 from public.grocery_lists gl
+                 where gl.id = grocery_items.grocery_list_id
+                   and gl.user_id = auth.uid()));
+
+-- -------------------------------------------------------- alert_deliveries --
+-- Has its own user_id AND an alert_id. Both must agree.
+alter table public.alert_deliveries enable row level security;
+alter table public.alert_deliveries force row level security;
+
+drop policy if exists alert_deliveries_select on public.alert_deliveries;
+create policy alert_deliveries_select on public.alert_deliveries
+  for select to authenticated
+  using (auth.uid() = user_id
+         and exists (select 1 from public.alerts a
+                     where a.id = alert_deliveries.alert_id
+                       and a.user_id = auth.uid()));
+
+drop policy if exists alert_deliveries_insert on public.alert_deliveries;
+create policy alert_deliveries_insert on public.alert_deliveries
+  for insert to authenticated
+  with check (auth.uid() = user_id
+              and exists (select 1 from public.alerts a
+                          where a.id = alert_deliveries.alert_id
+                            and a.user_id = auth.uid()));
+
+drop policy if exists alert_deliveries_update on public.alert_deliveries;
+create policy alert_deliveries_update on public.alert_deliveries
+  for update to authenticated
+  using (auth.uid() = user_id
+         and exists (select 1 from public.alerts a
+                     where a.id = alert_deliveries.alert_id
+                       and a.user_id = auth.uid()))
+  with check (auth.uid() = user_id
+              and exists (select 1 from public.alerts a
+                          where a.id = alert_deliveries.alert_id
+                            and a.user_id = auth.uid()));
+
+drop policy if exists alert_deliveries_delete on public.alert_deliveries;
+create policy alert_deliveries_delete on public.alert_deliveries
+  for delete to authenticated
+  using (auth.uid() = user_id
+         and exists (select 1 from public.alerts a
+                     where a.id = alert_deliveries.alert_id
+                       and a.user_id = auth.uid()));
+
+-- ----------------------------------------------------------- chat_messages --
+-- Has its own user_id AND a thread_id. Both must agree, so a message cannot be
+-- planted into another user's thread.
+alter table public.chat_messages enable row level security;
+alter table public.chat_messages force row level security;
+
+drop policy if exists chat_messages_select on public.chat_messages;
+create policy chat_messages_select on public.chat_messages
+  for select to authenticated
+  using (auth.uid() = user_id
+         and exists (select 1 from public.chat_threads t
+                     where t.id = chat_messages.thread_id
+                       and t.user_id = auth.uid()));
+
+drop policy if exists chat_messages_insert on public.chat_messages;
+create policy chat_messages_insert on public.chat_messages
+  for insert to authenticated
+  with check (auth.uid() = user_id
+              and exists (select 1 from public.chat_threads t
+                          where t.id = chat_messages.thread_id
+                            and t.user_id = auth.uid()));
+
+drop policy if exists chat_messages_update on public.chat_messages;
+create policy chat_messages_update on public.chat_messages
+  for update to authenticated
+  using (auth.uid() = user_id
+         and exists (select 1 from public.chat_threads t
+                     where t.id = chat_messages.thread_id
+                       and t.user_id = auth.uid()))
+  with check (auth.uid() = user_id
+              and exists (select 1 from public.chat_threads t
+                          where t.id = chat_messages.thread_id
+                            and t.user_id = auth.uid()));
+
+drop policy if exists chat_messages_delete on public.chat_messages;
+create policy chat_messages_delete on public.chat_messages
+  for delete to authenticated
+  using (auth.uid() = user_id
+         and exists (select 1 from public.chat_threads t
+                     where t.id = chat_messages.thread_id
+                       and t.user_id = auth.uid()));
+
+
+-- ###########################################################################
+-- 3. REFERENCE TABLES  (read-only to logged-in users, no write policy)
+--
+-- RLS is ON and there is a SELECT policy only. With no INSERT/UPDATE/DELETE
+-- policy, RLS denies every write from `authenticated` no matter what the GRANT
+-- says. The service role has BYPASSRLS and is the only thing that can seed or
+-- correct this data.
+-- ###########################################################################
+
+-- ------------------------------------------------------------- biomarkers --
+alter table public.biomarkers enable row level security;
+drop policy if exists biomarkers_read on public.biomarkers;
+create policy biomarkers_read on public.biomarkers
+  for select to authenticated using (true);
+
+-- ----------------------------------------------------- biomarker_synonyms --
+alter table public.biomarker_synonyms enable row level security;
+drop policy if exists biomarker_synonyms_read on public.biomarker_synonyms;
+create policy biomarker_synonyms_read on public.biomarker_synonyms
+  for select to authenticated using (true);
+
+-- -------------------------------------------------------- reference_ranges --
+alter table public.reference_ranges enable row level security;
+drop policy if exists reference_ranges_read on public.reference_ranges;
+create policy reference_ranges_read on public.reference_ranges
+  for select to authenticated using (true);
+
+-- ------------------------------------------------------------------ foods --
+alter table public.foods enable row level security;
+drop policy if exists foods_read on public.foods;
+create policy foods_read on public.foods
+  for select to authenticated using (true);
+
+-- ---------------------------------------------------------------- recipes --
+alter table public.recipes enable row level security;
+drop policy if exists recipes_read on public.recipes;
+create policy recipes_read on public.recipes
+  for select to authenticated using (true);
+
+-- ----------------------------------------------------------- recipe_items --
+-- recipe_items hangs off recipes, which is shared reference data and has no
+-- owner. The policy still walks up to the parent, so an ingredient line is
+-- visible exactly when its recipe is visible. No write policy.
+alter table public.recipe_items enable row level security;
+drop policy if exists recipe_items_read on public.recipe_items;
+create policy recipe_items_read on public.recipe_items
+  for select to authenticated
+  using (exists (select 1 from public.recipes r
+                 where r.id = recipe_items.recipe_id));
+
+-- ------------------------------------------------------------ rda_targets --
+alter table public.rda_targets enable row level security;
+drop policy if exists rda_targets_read on public.rda_targets;
+create policy rda_targets_read on public.rda_targets
+  for select to authenticated using (true);
+
+
+-- ###########################################################################
+-- 4. Self-check: fail loudly if any public table was left without RLS.
+-- ###########################################################################
+do $$
+declare
+  missing text;
+begin
+  select string_agg(c.relname, ', ' order by c.relname)
+    into missing
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  where n.nspname = 'public'
+    and c.relkind = 'r'
+    and not c.relrowsecurity;
+
+  if missing is not null then
+    raise exception 'RLS is NOT enabled on: %', missing;
+  end if;
+
+  raise notice 'RLS enabled on every table in schema public.';
+end
+$$;
