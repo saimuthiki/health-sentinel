@@ -118,12 +118,34 @@ def test_profile_rejects_unknown_fields(client, auth):
 
 
 def test_validation_errors_never_echo_the_submitted_value(client, auth):
+    """A rejected health value must not come back inside the error.
+
+    Weight, glucose and the rest are sensitive, and an error body gets logged,
+    proxied and screenshotted far more casually than a health record does. The
+    response carries the field name and the kind of problem, never the value.
+
+    The request_id is excluded from the scan on purpose. It is a random hex
+    string, 0-9 are hex digits, so it can contain any short run of digits by
+    chance -- this assertion scanned the whole body and failed in CI on a
+    request_id of 82ad945e900c40b2... while passing locally. The id is generated
+    by us and never derived from the request, so it cannot echo anything.
+    """
     response = request(
         client, "PUT", "/v1/me/profile", headers=auth, json={"weight_kg": -900}
     )
     assert response.status_code == 422
-    assert "-900" not in response.text
-    assert "900" not in response.text
+
+    body = response.json()
+    scanned = {key: value for key, value in body.items() if key != "request_id"}
+    # Guard against the exclusion quietly widening: request_id must be the only
+    # thing held back, and it must actually have been there.
+    assert set(body) - set(scanned) == {"request_id"}
+
+    rendered = json.dumps(scanned)
+    assert "-900" not in rendered
+    assert "900" not in rendered
+    # The field name and problem kind are what a client legitimately needs.
+    assert any(error["field"] == "weight_kg" for error in body["errors"])
 
 
 def test_consent_is_recorded_with_a_hash_not_an_address(client, auth, store):
