@@ -99,10 +99,7 @@ void main() {
 
   testWidgets('offers the way out to sample data, and says it stays on the phone',
       (WidgetTester tester) async {
-    // The screen is a ListView, which builds lazily, and this button sits below
-    // the fold of the 800x600 default test surface -- so it was never built and
-    // find.text saw nothing. Use a phone-shaped surface instead, which is both
-    // what the screen is designed for and enough for the whole column to build.
+    // A phone-shaped surface, because that is what this screen is for.
     tester.view.physicalSize = const Size(400, 1400);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
@@ -111,7 +108,15 @@ void main() {
     await tester.pumpWidget(wrap(const AppConfig()));
     await tester.pump();
 
-    expect(find.text('Look around with sample data'), findsOneWidget);
+    // The screen is a ListView, so it builds lazily and this button is not built
+    // until it is scrolled near. Enlarging the surface is not a reliable fix --
+    // a narrower surface wraps more text and pushes the button further down, so
+    // any height picked here is a guess. Scrolling to it is height-independent.
+    final Finder button = find.text('Look around with sample data');
+    await tester.scrollUntilVisible(button, 300);
+    await tester.pump();
+
+    expect(button, findsOneWidget);
     expect(find.textContaining('leaves this phone'), findsOneWidget);
   });
 
