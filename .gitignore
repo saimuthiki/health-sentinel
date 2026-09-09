@@ -1,0 +1,42 @@
+# secrets — never commit
+.env
+*.env
+!.env.example
+key.properties
+*.jks
+*.keystore
+service-account*.json
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# flutter / dart
+app/.dart_tool/
+app/.flutter-plugins*
+app/build/
+app/pubspec.lock
+app/android/local.properties
+app/android/.gradle/
+app/android/app/debug/
+app/android/app/release/
+# the Flutter tool injects the Gradle wrapper; a properties file without its jar breaks that
+app/android/gradlew
+app/android/gradlew.bat
+app/android/gradle/wrapper/
+
+# personal health data — must never be committed
+samples/*
+!samples/README.md
+
+# editors / os
+.idea/
+.vscode/
+.DS_Store
