@@ -1,0 +1,43 @@
+name: Backend
+
+on:
+  push:
+    paths: ['backend/**', '.github/workflows/backend.yml']
+  pull_request:
+    paths: ['backend/**', '.github/workflows/backend.yml']
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check app tests
+
+      - name: Test
+        # No network is available to these tests by design -- every Gemini call is
+        # mocked. A test that reaches out is a bug, not a flake.
+        run: pytest tests -q --cov=app --cov-report=term-missing
+
+      - name: Assert no secret is committed
+        working-directory: .
+        run: |
+          if grep -rniE "GEMINI_API_KEY[[:space:]]*[:=][[:space:]]*['\"]?[A-Za-z0-9_.-]{15,}" \
+               --exclude-dir=.git --exclude=.env.example . ; then
+            echo "::error::A value that looks like a real API key is committed."
+            exit 1
+          fi
+          echo "No committed secrets found."

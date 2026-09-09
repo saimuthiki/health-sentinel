@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Mirrors HpColors.ground in the dark scheme. -->
+    <color name="hp_launch_background">#0D1512</color>
+    <color name="hp_icon_background">#12362C</color>
+    <color name="hp_mark_stroke">#7FCBAE</color>
+    <color name="hp_mark_dot">#F0BC5E</color>
+</resources>

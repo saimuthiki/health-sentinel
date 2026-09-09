@@ -1,0 +1,4 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required so the Flutter tool can attach to a profile-mode build. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+</manifest>

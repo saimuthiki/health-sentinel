@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- horizon -->
+    <path
+        android:pathData="M32,70 L76,70"
+        android:strokeColor="@color/hp_mark_stroke"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:strokeAlpha="0.4" />
+
+    <!-- the arc of the day -->
+    <path
+        android:pathData="M30,60 A24,24 0 0 1 78,60"
+        android:strokeColor="@color/hp_mark_stroke"
+        android:strokeWidth="8"
+        android:strokeLineCap="round" />
+
+    <!-- now -->
+    <path
+        android:pathData="M63,43 A8,8 0 1 1 79,43 A8,8 0 1 1 63,43 Z"
+        android:fillColor="@color/hp_mark_dot" />
+</vector>

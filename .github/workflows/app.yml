@@ -1,0 +1,100 @@
+name: Android app
+
+on:
+  push:
+    paths: ['app/**', '.github/workflows/app.yml']
+  pull_request:
+    paths: ['app/**', '.github/workflows/app.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    env:
+      # The `secrets` context is not available in a step-level `if`, but it is
+      # available here. Steps branch on this string instead.
+      HAS_KEYSTORE: ${{ secrets.KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          # Not pinned yet: the dependency set has no committed pubspec.lock, so the
+          # first green run tells us which stable version to pin to. Pin both this and
+          # the lockfile immediately afterwards -- an unpinned toolchain plus an
+          # unpinned dependency set means a build that works today can break tomorrow
+          # with no change from us.
+          channel: stable
+          cache: true
+
+      - name: Flutter version in use
+        run: flutter --version
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+      - name: Test
+        run: flutter test --reporter expanded
+
+      - name: Restore signing key
+        # Only when the four secrets are present. Without them the release build
+        # falls back to debug signing, which still installs on a phone -- it just
+        # cannot go to the Play Store. See docs/06-your-manual-steps.md step M7.
+        if: env.HAS_KEYSTORE == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > android/upload.jks
+          cat > android/key.properties <<PROPS
+          storeFile=upload.jks
+          storePassword=$KEYSTORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
+          PROPS
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Build App Bundle
+        # The Play Store takes .aab, not .apk. Sideloading to your own phone takes .apk.
+        if: env.HAS_KEYSTORE == 'true'
+        run: flutter build appbundle --release
+
+      - name: Remove signing material
+        if: always()
+        run: rm -f android/upload.jks android/key.properties
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: healthpulse-apk
+          path: app/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload App Bundle
+        if: env.HAS_KEYSTORE == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: healthpulse-aab
+          path: app/build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: warn
+          retention-days: 30

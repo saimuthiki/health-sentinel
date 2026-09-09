@@ -1,0 +1,84 @@
+name: healthpulse
+description: HealthPulse - an AI health and nutrition coach. Not a doctor.
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+  flutter: ">=3.24.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management. Classic Notifier/Provider API only - the codegen variant
+  # (riverpod_generator + build_runner) is deliberately not used because generated
+  # files cannot be produced in the authoring environment.
+  flutter_riverpod: ^2.6.1
+
+  # Declarative routing, deep links and the stateful bottom-navigation shell.
+  go_router: ^14.6.2
+
+  # Talking to our own FastAPI backend. Nothing else may hold a Gemini key.
+  http: ^1.2.2
+
+  # Supabase auth only for now (email + Google). Database access goes through the
+  # backend so that Row Level Security and the safety validator cannot be bypassed.
+  supabase_flutter: ^2.8.0
+
+  # The session token is the only secret on the device, and it lives in the
+  # Android Keystore rather than in shared preferences.
+  flutter_secure_storage: ^9.2.2
+
+  # Offline cache of today's plan and recent lab values (docs/02-architecture.md).
+  sqflite: ^2.4.1
+  path: ^1.9.0
+  path_provider: ^2.1.5
+
+  # Report upload: PDFs from the lab portal, photos of a printed report, food photos.
+  file_picker: ^8.1.6
+  image_picker: ^1.1.2
+
+  # Every alert in the product is time-based, so the phone schedules it itself and
+  # it works offline (docs/02-architecture.md section 3). Requires core library
+  # desugaring in android/app/build.gradle.
+  flutter_local_notifications: ^18.0.1
+  timezone: ^0.9.4
+  flutter_timezone: ^3.0.1
+
+  # Biomarker trend charts.
+  fl_chart: ^0.69.2
+
+  # Dates, times and number formatting for a single locale today, many later.
+  intl: ^0.19.0
+
+  # Small non-secret device preferences: last tab, units, onboarding completion.
+  shared_preferences: ^2.3.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+
+  fonts:
+    - family: Literata
+      fonts:
+        - asset: assets/fonts/Literata-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Literata-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Literata-SemiBold.ttf
+          weight: 600
+    - family: HankenGrotesk
+      fonts:
+        - asset: assets/fonts/HankenGrotesk-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/HankenGrotesk-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/HankenGrotesk-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/HankenGrotesk-Bold.ttf
+          weight: 700

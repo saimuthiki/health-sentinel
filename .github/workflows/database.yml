@@ -1,0 +1,66 @@
+name: Database
+
+on:
+  push:
+    paths: ['db/**', '.github/workflows/database.yml']
+  pull_request:
+    paths: ['db/**', '.github/workflows/database.yml']
+  workflow_dispatch:
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+        ports: ['5432:5432']
+    env:
+      PGPASSWORD: postgres
+      PSQL: psql -h localhost -U postgres -d healthpulse -v ON_ERROR_STOP=1 -q
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create database
+        run: psql -h localhost -U postgres -c 'create database healthpulse'
+
+      - name: Apply migrations, policies and seed
+        # 000_local_supabase_shim.sql stands in for the auth/storage schemas that
+        # Supabase provides. It must never be run against a real Supabase project.
+        run: |
+          for f in db/tests/000_local_supabase_shim.sql db/migrations/*.sql db/policies/*.sql db/seed/*.sql; do
+            echo "--> $f"; $PSQL -f "$f"
+          done
+
+      - name: Apply everything a second time (idempotency)
+        run: |
+          for f in db/tests/000_local_supabase_shim.sql db/migrations/*.sql db/policies/*.sql db/seed/*.sql; do
+            $PSQL -f "$f"
+          done
+
+      - name: Every table must have row level security
+        run: |
+          n=$($PSQL -At -c "select count(*) from pg_tables t where schemaname='public'
+                and not exists (select 1 from pg_class c join pg_namespace ns on ns.oid=c.relnamespace
+                where ns.nspname='public' and c.relname=t.tablename and c.relrowsecurity)")
+          echo "tables without RLS: $n"
+          [ "$n" = "0" ] || { echo "::error::$n table(s) in public have no RLS."; exit 1; }
+
+      - name: Every reference range must cite a source
+        run: |
+          n=$($PSQL -At -c "select count(*) from reference_ranges
+                where source_citation is null or btrim(source_citation)=''")
+          [ "$n" = "0" ] || { echo "::error::$n reference range(s) with no citation."; exit 1; }
+
+      - name: No synonym may point at a biomarker that does not exist
+        run: |
+          n=$($PSQL -At -c "select count(*) from biomarker_synonyms s
+                left join biomarkers b on b.code=s.biomarker_code where b.code is null")
+          [ "$n" = "0" ] || { echo "::error::$n orphan synonym(s)."; exit 1; }
+
+      - name: Cross-user isolation smoke test
+        run: $PSQL -f db/tests/rls_smoke.sql

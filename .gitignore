@@ -22,7 +22,9 @@ htmlcov/
 app/.dart_tool/
 app/.flutter-plugins*
 app/build/
-app/pubspec.lock
+# pubspec.lock IS committed for an app -- it is what makes a build reproducible.
+# It does not exist yet because there is no Dart SDK in the authoring environment;
+# commit the one the first green CI run produces.
 app/android/local.properties
 app/android/.gradle/
 app/android/app/debug/

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Mirrors HpColors.ground in lib/core/theme/hp_colors.dart. -->
+    <color name="hp_launch_background">#EDF1EA</color>
+    <color name="hp_icon_background">#12362C</color>
+    <color name="hp_mark_stroke">#1D5C4A</color>
+    <color name="hp_mark_dot">#C4820F</color>
+</resources>

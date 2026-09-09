@@ -1,0 +1,5 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required so the Flutter tool can talk to the running app over the local
+         network during development. Debug builds only. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+</manifest>
