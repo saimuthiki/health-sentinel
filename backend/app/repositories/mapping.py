@@ -1,18 +1,26 @@
-"""Row <-> domain translation, and the three places the schema and the enums differ.
+"""Row <-> domain translation, and where the schema and the enums still differ.
 
-Every mismatch below is a real difference between ``backend/app/domain/enums.py`` and the
-CHECK constraints in ``db/migrations``. Neither side is mine to change, so the mapping is
-written down here, in one place, rather than being improvised at each call site. All
-three are reported back to whoever owns those two files.
+Two of the three original mismatches were closed in db/migrations/009_domain_alignment.sql
+rather than papered over here, because both were lossy on write and a value a user
+chose was coming back as a different one:
 
-1. ``ActivityLevel`` has five members; ``health_profiles.activity_level`` accepts three
-   (``sedentary``/``moderate``/``heavy``, matching the ICMR-NIN bands used by
-   ``rda_targets``). Writing is lossy: ``light`` stores as ``sedentary`` and
-   ``very_active`` as ``heavy``.
-2. ``MealSlot.EVENING_SNACK`` is ``evening_snack``; ``meal_plan_items.meal_slot`` accepts
-   ``snack`` (and a ``bedtime`` the enum has no member for).
-3. ``health_profiles.sex`` also accepts ``prefer_not_to_say``, which reads back as
-   ``Sex.OTHER``.
+* ``activity_level`` accepted only three of ``ActivityLevel``'s five members, so
+  "very active" was stored as "heavy" and read back as "active". Nutrition targets key
+  off activity, so the downgrade quietly changed what the app recommended. The column
+  now accepts all five and the value round-trips. The three-band ICMR-NIN mapping still
+  exists, but it lives in ``nutrition/targets.py`` where it belongs -- applied at lookup,
+  losing nothing stored.
+* ``meal_plan_items.meal_slot`` accepted ``snack`` but not ``evening_snack``. It now
+  accepts both, and ``MealSlot.EVENING_SNACK`` stores as itself. The legacy spellings are
+  still read so no existing row is orphaned.
+
+One mismatch is left standing on purpose:
+
+* ``health_profiles.sex`` accepts ``prefer_not_to_say``, which ``Sex`` has no member for
+  and which reads back as ``Sex.OTHER``. Collapsing those two would be the same defect as
+  the ones above -- they mean different things to a person. The real fix is a new enum
+  member, and because ``Sex`` selects reference ranges, that deserves a deliberate pass
+  rather than a drive-by. Recorded in db/migrations/009 as a decision, not an oversight.
 """
 
 from __future__ import annotations
@@ -25,17 +33,15 @@ from app.domain.models import Allergy, HealthProfile
 
 # ------------------------------------------------------------------ activity level
 
-_ACTIVITY_TO_DB: dict[ActivityLevel, str] = {
-    ActivityLevel.SEDENTARY: "sedentary",
-    ActivityLevel.LIGHT: "sedentary",
-    ActivityLevel.MODERATE: "moderate",
-    ActivityLevel.ACTIVE: "heavy",
-    ActivityLevel.VERY_ACTIVE: "heavy",
-}
+#: Each member stores as its own value -- the column accepts all five since
+#: migration 009. Nothing is folded on the way in.
+_ACTIVITY_TO_DB: dict[ActivityLevel, str] = {level: level.value for level in ActivityLevel}
 
+#: Reading also accepts the pre-009 spellings, so rows written before the migration
+#: still load. "heavy" was what both ACTIVE and VERY_ACTIVE collapsed to; it cannot be
+#: un-collapsed, and ACTIVE is the less surprising of the two to show back.
 _ACTIVITY_FROM_DB: dict[str, ActivityLevel] = {
-    "sedentary": ActivityLevel.SEDENTARY,
-    "moderate": ActivityLevel.MODERATE,
+    **{level.value: level for level in ActivityLevel},
     "heavy": ActivityLevel.ACTIVE,
 }
 
@@ -54,7 +60,7 @@ _SLOT_TO_DB: dict[MealSlot, str] = {
     MealSlot.BREAKFAST: "breakfast",
     MealSlot.MID_MORNING: "mid_morning",
     MealSlot.LUNCH: "lunch",
-    MealSlot.EVENING_SNACK: "snack",
+    MealSlot.EVENING_SNACK: "evening_snack",
     MealSlot.DINNER: "dinner",
 }
 

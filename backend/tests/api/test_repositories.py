@@ -231,20 +231,35 @@ def test_a_missing_object_is_a_404_not_a_500(gateway, principal):
 # ---------------------------------------------------------------------- the mappings
 
 
-def test_activity_level_maps_to_the_three_the_schema_allows():
-    assert activity_to_db(ActivityLevel.LIGHT) == "sedentary"
-    assert activity_to_db(ActivityLevel.VERY_ACTIVE) == "heavy"
-    assert {activity_to_db(level) for level in ActivityLevel} <= {
-        "sedentary",
-        "moderate",
-        "heavy",
-    }
+def test_every_activity_level_survives_a_round_trip():
+    """A value the user chose must come back as the value they chose.
+
+    Before migration 009 the column accepted only three of the five members, so
+    "very active" was stored as "heavy" and shown back as "active". Nutrition
+    targets key off activity, so that downgrade silently changed the app's
+    recommendations too. This test is what stops it coming back.
+    """
+    for level in ActivityLevel:
+        assert activity_from_db(activity_to_db(level)) is level, level
+
+    # The three-band ICMR-NIN grouping still exists, but in nutrition/targets.py,
+    # applied at lookup rather than at write.
+    assert activity_to_db(ActivityLevel.LIGHT) == "light"
+    assert activity_to_db(ActivityLevel.VERY_ACTIVE) == "very_active"
+
+
+def test_pre_migration_activity_values_still_load():
+    """Rows written before 009 used the three-band spellings."""
     assert activity_from_db("heavy") is ActivityLevel.ACTIVE
+    assert activity_from_db("sedentary") is ActivityLevel.SEDENTARY
+    assert activity_from_db("moderate") is ActivityLevel.MODERATE
     assert activity_from_db(None) is ActivityLevel.MODERATE
 
 
 def test_meal_slot_maps_to_the_schemas_names():
-    assert slot_to_db(MealSlot.EVENING_SNACK) == "snack"
+    # Since migration 009 the column accepts the enum's own spelling.
+    assert slot_to_db(MealSlot.EVENING_SNACK) == "evening_snack"
+    # The pre-009 spellings still read, so no existing row is orphaned.
     assert slot_from_db("snack") is MealSlot.EVENING_SNACK
     assert slot_from_db("bedtime") is MealSlot.EVENING_SNACK
     assert slot_from_db("nonsense") is None
@@ -276,7 +291,9 @@ def test_a_health_profile_round_trips_through_a_row():
 
     back = health_profile_to_row(profile)
     assert back["pregnancy"] is False
-    assert back["meal_times"]["snack"] == "17:30:00"
+    # Written with the enum's own spelling since migration 009; the row above still
+    # uses the old "snack" key, which is why reading it worked.
+    assert back["meal_times"]["evening_snack"] == "17:30:00"
 
 
 def test_an_empty_profile_gives_documented_defaults():

@@ -5,6 +5,5 @@ pydantic-settings==2.7.0
 httpx==0.28.1
 python-multipart==0.0.20
 pyjwt[crypto]==2.10.1
-supabase==2.11.0
 python-dateutil==2.9.0.post0
 structlog==24.4.0
