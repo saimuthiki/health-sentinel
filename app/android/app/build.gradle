@@ -26,7 +26,9 @@ if (hasReleaseKeystore) {
 
 android {
     namespace = "com.saimuthiki.healthpulse"
-    compileSdk = 35
+    // androidx.core 1.18.0 and androidx.navigationevent, pulled in transitively by
+    // the Flutter plugins, require their consumers to compile against API 36.
+    compileSdk = 36
 
     // Pinned rather than inherited from `flutter.ndkVersion`: several plugins in
     // this app declare NDK 27, and Android Gradle Plugin 8.7 fails the build when
@@ -48,7 +50,10 @@ android {
     defaultConfig {
         applicationId = "com.saimuthiki.healthpulse"
         minSdk = 26
-        targetSdk = 35
+        // Kept in step with compileSdk. Google Play raises its required targetSdk
+        // roughly a year after each release, so shipping below the compile level
+        // only defers the same change.
+        targetSdk = 36
         versionCode = flutterVersionCode.toInteger()
         versionName = flutterVersionName
     }
