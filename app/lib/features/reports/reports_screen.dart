@@ -168,7 +168,7 @@ class ReportsScreen extends ConsumerWidget {
 }
 
 class _ReportCard extends StatelessWidget {
-  const _ReportCard({super.key, required this.report});
+  const _ReportCard({required this.report});
 
   final HealthReport report;
 
@@ -244,7 +244,7 @@ class _ReportCard extends StatelessWidget {
 }
 
 class _TrendCard extends StatelessWidget {
-  const _TrendCard({super.key, required this.trend});
+  const _TrendCard({required this.trend});
 
   final BiomarkerTrend trend;
 

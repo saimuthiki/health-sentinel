@@ -91,7 +91,7 @@ def test_an_unrelated_food_is_not_excluded_by_an_allergy(catalogue) -> None:
 
 
 def test_no_allergies_excludes_nothing_on_allergen_grounds(catalogue) -> None:
-    allowed, rejected = CD.filter_foods(catalogue, profile())
+    _allowed, rejected = CD.filter_foods(catalogue, profile())
     assert [r for r in rejected if r.reason == "allergen"] == []
 
 
@@ -224,7 +224,6 @@ def test_a_met_gap_contributes_nothing_to_the_score(catalogue) -> None:
 
 def test_a_gap_report_drives_ranking_through_its_effective_deficit(catalogue) -> None:
     from app.domain.enums import ResultStatus
-
     from app.nutrition import gaps as G
     from tests.nutrition.conftest import lab
 

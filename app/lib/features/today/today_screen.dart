@@ -58,7 +58,7 @@ class TodayScreen extends ConsumerWidget {
 }
 
 class _TodayBody extends ConsumerWidget {
-  const _TodayBody({super.key, required this.briefing});
+  const _TodayBody({required this.briefing});
 
   final TodayBriefing briefing;
 
@@ -305,7 +305,7 @@ class _Moment {
 }
 
 class _FocusCard extends StatelessWidget {
-  const _FocusCard({super.key, required this.note});
+  const _FocusCard({required this.note});
 
   final FocusNote note;
 

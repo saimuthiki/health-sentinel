@@ -138,7 +138,6 @@ class _ConsentScreenState extends ConsumerState<ConsentScreen> {
 
 class _ConsentBlock extends StatelessWidget {
   const _ConsentBlock({
-    super.key,
     required this.icon,
     required this.title,
     required this.body,

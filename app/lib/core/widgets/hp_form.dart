@@ -138,7 +138,6 @@ class HpMultiChoiceGroup<T> extends StatelessWidget {
 
 class _ChoicePill extends StatelessWidget {
   const _ChoicePill({
-    super.key,
     required this.label,
     required this.isSelected,
     required this.onTap,

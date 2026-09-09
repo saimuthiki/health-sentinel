@@ -63,7 +63,13 @@ class GeminiError(RuntimeError):
 class GeminiRateLimited(GeminiError):
     """429 (or repeated 5xx) after every retry was exhausted."""
 
-    def __init__(self, message: str, *, status: int | None = 429, retry_after: float | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int | None = 429,
+        retry_after: float | None = None,
+    ) -> None:
         super().__init__(message, status=status)
         self.retry_after = retry_after
 
@@ -112,7 +118,10 @@ class _RedactingFilter(logging.Filter):
             record.msg = redact(record.msg)
         if record.args:
             if isinstance(record.args, dict):
-                record.args = {k: redact(v) if isinstance(v, str) else v for k, v in record.args.items()}
+                record.args = {
+                    k: redact(v) if isinstance(v, str) else v
+                    for k, v in record.args.items()
+                }
             elif isinstance(record.args, tuple):
                 record.args = tuple(redact(a) if isinstance(a, str) else a for a in record.args)
         return True
@@ -134,10 +143,7 @@ def inline_data_part(data: bytes | str, mime_type: str) -> dict[str, Any]:
 
     ``data`` may already be base64 text (str) or raw bytes.
     """
-    if isinstance(data, bytes):
-        encoded = base64.b64encode(data).decode("ascii")
-    else:
-        encoded = data
+    encoded = base64.b64encode(data).decode("ascii") if isinstance(data, bytes) else data
     return {"inline_data": {"mime_type": mime_type, "data": encoded}}
 
 
@@ -382,12 +388,16 @@ class GeminiClient:
                 response = await self._http().post(url, json=payload, headers=headers)
             except httpx.TimeoutException as exc:
                 if attempts >= self.max_attempts:
-                    raise GeminiError(f"gemini request timed out after {attempts} attempts: {exc}") from exc
+                    raise GeminiError(
+                        f"gemini request timed out after {attempts} attempts: {exc}"
+                    ) from exc
                 await self._backoff(attempts, None)
                 continue
             except httpx.HTTPError as exc:
                 if attempts >= self.max_attempts:
-                    raise GeminiError(f"gemini transport error after {attempts} attempts: {exc}") from exc
+                    raise GeminiError(
+                        f"gemini transport error after {attempts} attempts: {exc}"
+                    ) from exc
                 await self._backoff(attempts, None)
                 continue
 
@@ -498,13 +508,15 @@ class GeminiClient:
         upper_finish = (finish_reason or "").upper()
         if upper_finish in BLOCKED_FINISH_REASONS:
             raise GeminiSafetyBlocked(
-                f"gemini blocked the answer (finishReason={finish_reason})", reason=str(finish_reason)
+                f"gemini blocked the answer (finishReason={finish_reason})",
+                reason=str(finish_reason),
             )
         if not candidates:
             raise GeminiInvalidResponse("gemini returned no candidates")
         if upper_finish in TRUNCATED_FINISH_REASONS and not allow_truncated:
             raise GeminiTruncated(
-                f"gemini answer was truncated (finishReason={finish_reason}); refusing to use a partial answer"
+                f"gemini answer was truncated (finishReason={finish_reason}); "
+                "refusing to use a partial answer"
             )
 
         text = _collect_text(candidates[0])

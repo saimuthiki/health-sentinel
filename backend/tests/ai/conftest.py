@@ -16,11 +16,11 @@ import pytest
 _MESSAGE = "a test tried to make a real HTTP request; mock it with respx"
 
 
-def handle_request(self: Any, request: Any) -> Any:  # noqa: D103 - mirrors httpcore
+def handle_request(self: Any, request: Any) -> Any:
     raise AssertionError(_MESSAGE)
 
 
-async def handle_async_request(self: Any, request: Any) -> Any:  # noqa: D103
+async def handle_async_request(self: Any, request: Any) -> Any:
     raise AssertionError(_MESSAGE)
 
 

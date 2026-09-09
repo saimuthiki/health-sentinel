@@ -169,7 +169,6 @@ class MoreScreen extends ConsumerWidget {
 
 class _MoreTile extends StatelessWidget {
   const _MoreTile({
-    super.key,
     required this.icon,
     required this.title,
     required this.subtitle,

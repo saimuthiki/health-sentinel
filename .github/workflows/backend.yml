@@ -25,12 +25,12 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Lint
-        run: ruff check app tests
+        run: python -m ruff check app tests
 
       - name: Test
         # No network is available to these tests by design -- every Gemini call is
         # mocked. A test that reaches out is a bug, not a flake.
-        run: pytest tests -q --cov=app --cov-report=term-missing
+        run: python -m pytest --cov=app --cov-report=term-missing
 
       - name: Assert no secret is committed
         working-directory: .

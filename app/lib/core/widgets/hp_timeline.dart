@@ -57,7 +57,7 @@ class HpDayTimeline extends StatelessWidget {
 }
 
 class _TimelineRow extends StatelessWidget {
-  const _TimelineRow({super.key, required this.entry, required this.isLast});
+  const _TimelineRow({required this.entry, required this.isLast});
 
   final HpTimelineEntry entry;
   final bool isLast;
@@ -173,7 +173,6 @@ class _TimelineRow extends StatelessWidget {
 
 class _Node extends StatelessWidget {
   const _Node({
-    super.key,
     required this.icon,
     required this.isNow,
     required this.isDone,

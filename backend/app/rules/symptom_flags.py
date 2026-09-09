@@ -54,7 +54,7 @@ STOPWORDS: frozenset[str] = frozenset(
         "is", "am", "are", "was", "were", "be", "been", "being", "has", "have", "had",
         "i", "im", "ive", "id", "we", "he", "she", "they", "it", "its", "this", "that",
         "there", "here", "get", "getting", "got", "feel", "feeling", "felt", "feels",
-        "having", "been", "also", "just", "really", "very", "so", "too", "much",
+        "having", "also", "just", "really", "very", "so", "too", "much",
         "since", "from", "for", "at", "on", "in", "and", "or", "as", "by", "with",
         "me", "myself", "you", "your", "sir", "madam", "doctor", "hi", "hello",
     }
@@ -118,7 +118,7 @@ def _is_adjacent_transposition(left: str, right: str) -> bool:
     on four-letter words does not catch."""
     if len(left) != len(right) or len(left) < 4:
         return False
-    diff = [index for index, (a, b) in enumerate(zip(left, right)) if a != b]
+    diff = [index for index, (a, b) in enumerate(zip(left, right, strict=False)) if a != b]
     if len(diff) != 2:
         return False
     first, second = diff
@@ -138,10 +138,12 @@ def _token_match(pattern_token: str, text_token: str) -> bool:
         return True
     if len(text_token) >= 4 and pattern_token.startswith(text_token):
         return True
-    if len(pattern_token) >= FUZZY_MIN_LEN and len(text_token) >= FUZZY_MIN_LEN:
-        if abs(len(pattern_token) - len(text_token)) <= 3:
-            ratio = SequenceMatcher(None, pattern_token, text_token).ratio()
-            return ratio >= FUZZY_RATIO
+    if (
+        len(pattern_token) >= FUZZY_MIN_LEN
+        and len(text_token) >= FUZZY_MIN_LEN
+        and abs(len(pattern_token) - len(text_token)) <= 3
+    ):
+        return SequenceMatcher(None, pattern_token, text_token).ratio() >= FUZZY_RATIO
     return False
 
 
@@ -393,7 +395,7 @@ def detect_matches(text: str) -> list[SymptomMatch]:
         for rule in SYMPTOM_RULES:
             if rule.code in seen:
                 continue
-            for phrase, phrase_tokens in zip(rule.phrases, rule.tokenised):
+            for phrase, phrase_tokens in zip(rule.phrases, rule.tokenised, strict=False):
                 if not phrase_tokens:
                     continue
                 start = _find_phrase(tokens, phrase_tokens)

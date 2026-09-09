@@ -14,7 +14,6 @@ from app.domain.enums import ResultStatus
 from app.rules import normalise as N
 from tests.rules.conftest import row
 
-
 # ------------------------------------------------------------------ unit conversions
 
 

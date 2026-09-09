@@ -16,7 +16,7 @@ stand behind.
 
 from __future__ import annotations
 
-from typing import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 from app.domain.models import NutrientGap
 
@@ -96,10 +96,7 @@ def format_amount(nutrient: str, value: float) -> str:
     unit = nutrient_unit(nutrient)
     if nutrient == "kcal":
         return f"{round(value):g} kcal"
-    if value >= 10:
-        text = f"{round(value):g}"
-    else:
-        text = f"{round(value, 1):g}"
+    text = f"{round(value):g}" if value >= 10 else f"{round(value, 1):g}"
     return f"{text} {unit}".strip()
 
 

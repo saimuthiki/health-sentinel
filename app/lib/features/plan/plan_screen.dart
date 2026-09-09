@@ -52,7 +52,7 @@ class PlanScreen extends ConsumerWidget {
 }
 
 class _Body extends StatelessWidget {
-  const _Body({super.key, required this.plan});
+  const _Body({required this.plan});
 
   final MealPlan plan;
 
@@ -123,7 +123,7 @@ class _Body extends StatelessWidget {
 }
 
 class _MealCard extends StatelessWidget {
-  const _MealCard({super.key, required this.item});
+  const _MealCard({required this.item});
 
   final MealPlanItem item;
 
@@ -188,7 +188,7 @@ class _MealCard extends StatelessWidget {
 }
 
 class _TotalsCard extends StatelessWidget {
-  const _TotalsCard({super.key, required this.plan});
+  const _TotalsCard({required this.plan});
 
   final MealPlan plan;
 

@@ -63,7 +63,7 @@ class ReportDetailScreen extends ConsumerWidget {
 }
 
 class _Body extends StatelessWidget {
-  const _Body({super.key, required this.report});
+  const _Body({required this.report});
 
   final HealthReport report;
 
@@ -116,7 +116,7 @@ class _Body extends StatelessWidget {
 }
 
 class _ResultCard extends StatelessWidget {
-  const _ResultCard({super.key, required this.result});
+  const _ResultCard({required this.result});
 
   final LabResult result;
 
@@ -188,7 +188,7 @@ class _ResultCard extends StatelessWidget {
 }
 
 class _MetaRow extends StatelessWidget {
-  const _MetaRow({super.key, required this.label, required this.value});
+  const _MetaRow({required this.label, required this.value});
 
   final String label;
   final String value;

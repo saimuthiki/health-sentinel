@@ -31,11 +31,10 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
-          # Not pinned yet: the dependency set has no committed pubspec.lock, so the
-          # first green run tells us which stable version to pin to. Pin both this and
-          # the lockfile immediately afterwards -- an unpinned toolchain plus an
-          # unpinned dependency set means a build that works today can break tomorrow
-          # with no change from us.
+          # Pinned to the version the first successful resolve used. An unpinned
+          # toolchain plus an unpinned dependency set means a build that works today
+          # can break tomorrow with no change from us.
+          flutter-version: '3.47.3'
           channel: stable
           cache: true
 

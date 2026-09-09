@@ -1,0 +1,41 @@
+# Tool configuration only. Deliberately no [project] or [tool.poetry] table: the
+# service installs from requirements.txt, and adding packaging metadata here would
+# invite the host's build-system autodetection to take a different path.
+
+[tool.pytest.ini_options]
+# Without this, `pytest` cannot import `app`. `python -m pytest` happens to work
+# because it puts the working directory on sys.path, which is exactly why this
+# was missed locally and only failed in CI. Pin it here so both invocations agree.
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q --strict-markers --strict-config"
+filterwarnings = ["error::DeprecationWarning:app.*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+# RUF001 flags "ambiguous" unicode characters. In these three modules the en dash,
+# curly apostrophe and non-breaking space appear inside string literals whose entire
+# purpose is to MATCH those characters -- unicode folding in the safety validator, and
+# messy printed lab values in the normaliser. Replacing them with ASCII lookalikes
+# would silently disable the folding and let an obfuscated drug name through. These
+# are load-bearing, not typos.
+"app/safety/validator.py" = ["RUF001", "E501"]  # E501: regex literals, safer unwrapped
+"app/rules/normalise.py" = ["RUF001"]
+"app/rules/symptom_flags.py" = ["RUF001"]
+# Prompt text and JSON schema literals read better unwrapped than folded at 100
+# columns; wrapping them adds concatenation noise around content a human must proofread.
+"app/ai/schemas.py" = ["E501"]
+"app/ai/context.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_ignores = true
+warn_redundant_casts = true
+ignore_missing_imports = true

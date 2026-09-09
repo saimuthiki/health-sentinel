@@ -18,6 +18,8 @@ from app.ai.schemas import ALL_SCHEMAS, SCHEMA_FOR_TASK, check_schema
 
 __all__ = [
     "ALL_SCHEMAS",
+    "MODELS",
+    "SCHEMA_FOR_TASK",
     "AiRun",
     "ContextLimits",
     "GeminiClient",
@@ -27,8 +29,6 @@ __all__ = [
     "GeminiResponse",
     "GeminiSafetyBlocked",
     "GeminiTruncated",
-    "MODELS",
-    "SCHEMA_FOR_TASK",
     "Task",
     "build_context_block",
     "check_schema",

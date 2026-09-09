@@ -30,9 +30,9 @@ from app.rules.normalise import canonical_unit, higher_is_worse
 __all__ = [
     "RangeSelection",
     "applies_to",
-    "pregnancy_flag",
     "classify",
     "classify_result",
+    "pregnancy_flag",
     "select_range",
     "specificity",
 ]
@@ -59,9 +59,8 @@ def applies_to(
     if reference.biomarker_code != biomarker_code:
         return False
 
-    if reference.sex is not None:
-        if sex is None or sex != reference.sex:
-            return False
+    if reference.sex is not None and (sex is None or sex != reference.sex):
+        return False
 
     if reference.age_min is not None or reference.age_max is not None:
         if age is None:
@@ -71,9 +70,15 @@ def applies_to(
         if reference.age_max is not None and age > reference.age_max:
             return False
 
-    if reference.pregnancy is not None:
-        if pregnant is None or bool(pregnant) != bool(reference.pregnancy):
-            return False
+    # The suppression below is deliberate. SIM103 would have this return the negated
+    # condition, but
+    # this is the last of a chain of guard clauses that all read "if disqualified,
+    # return False". Breaking the pattern on the final one makes the chain harder to
+    # scan, and this function decides which reference range applies to a person.
+    if reference.pregnancy is not None and (  # noqa: SIM103
+        pregnant is None or bool(pregnant) != bool(reference.pregnancy)
+    ):
+        return False
 
     return True
 
@@ -208,9 +213,7 @@ def _can_call_it_normal(
     needs_high = concerning_direction is not False
     if needs_low and reference.low is None and reference.borderline_low is None:
         return False
-    if needs_high and reference.high is None and reference.borderline_high is None:
-        return False
-    return True
+    return not (needs_high and reference.high is None and reference.borderline_high is None)
 
 
 def classify(

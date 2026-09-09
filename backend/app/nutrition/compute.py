@@ -12,10 +12,10 @@ away before anything is stored or displayed.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from dataclasses import field as dc_field
 from datetime import datetime
-from typing import Iterable, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict
 

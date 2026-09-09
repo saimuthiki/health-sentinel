@@ -19,9 +19,9 @@ Each rule states its own comparator in :data:`THRESHOLD_RULES`.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Callable, Iterable, Sequence
 
 from app.domain.enums import Escalation, ResultStatus
 from app.domain.models import ClassifiedResult, RedFlag

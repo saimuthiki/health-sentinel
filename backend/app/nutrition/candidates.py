@@ -20,8 +20,8 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Iterable, Sequence
 
 from app.domain.enums import DietType, Stance
 from app.domain.models import FoodItem, FoodPreference, HealthProfile, NutrientGap

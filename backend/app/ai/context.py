@@ -152,9 +152,7 @@ def summarise_history(
 
 
 _STOPWORDS = frozenset(
-    """a an the and or but if then i you my me we of to in on for with is am are was were
-    it this that have has had do does did not no so about at as be been can could would
-    should will just very really please thanks thank ok okay yes hi hello""".split()
+    ["a", "an", "the", "and", "or", "but", "if", "then", "i", "you", "my", "me", "we", "of", "to", "in", "on", "for", "with", "is", "am", "are", "was", "were", "it", "this", "that", "have", "has", "had", "do", "does", "did", "not", "no", "so", "about", "at", "as", "be", "been", "can", "could", "would", "should", "will", "just", "very", "really", "please", "thanks", "thank", "ok", "okay", "yes", "hi", "hello"]
 )
 
 

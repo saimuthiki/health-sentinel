@@ -85,7 +85,7 @@ GENERIC_DRUGS: frozenset[str] = frozenset(
         "levonorgestrel", "ethinylestradiol", "medroxyprogesterone", "progesterone",
         "estradiol", "clomiphene", "letrozole", "tamoxifen", "testosterone",
         "finasteride", "dutasteride", "minoxidil", "tamsulosin", "sildenafil",
-        "tadalafil", "spironolactone", "cabergoline", "bromocriptine",
+        "tadalafil", "cabergoline", "bromocriptine",
         # bone / kidney / other prescription molecules
         "alendronate", "risedronate", "zoledronic acid", "denosumab", "teriparatide",
         "allopurinol", "febuxostat", "colchicine", "sevelamer", "cinacalcet",

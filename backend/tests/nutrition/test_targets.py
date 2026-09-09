@@ -67,7 +67,7 @@ def test_a_pregnancy_row_would_win_when_one_is_supplied() -> None:
         nutrient="iron_mg", amount=27.0, unit="mg", source="fixture",
         sex=Sex.FEMALE, age_min=19, age_max=59, pregnancy=True,
     )
-    table = TG.RDA_TABLE + (pregnancy_row,)
+    table = (*TG.RDA_TABLE, pregnancy_row)
     pregnant = TG.resolve_target(
         profile(sex=Sex.FEMALE, is_pregnant=True), "iron_mg", on=TODAY, table=table
     )

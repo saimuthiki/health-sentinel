@@ -25,9 +25,9 @@ as one.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Iterable, Mapping, Sequence
 
 from app.domain.enums import ResultStatus
 from app.domain.models import (

@@ -152,7 +152,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 }
 
 class _Bubble extends StatelessWidget {
-  const _Bubble({super.key, required this.message});
+  const _Bubble({required this.message});
 
   final ChatMessage message;
 

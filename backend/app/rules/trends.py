@@ -24,11 +24,11 @@ listed in ``app/rules/GAPS.md``.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from enum import StrEnum
-from typing import Sequence
 
 __all__ = [
     "BIOLOGICAL_VARIATION",
@@ -36,8 +36,8 @@ __all__ = [
     "TrendDirection",
     "TrendPoint",
     "TrendResult",
-    "reference_change_value",
     "compute_trend",
+    "reference_change_value",
 ]
 
 SOURCE_BIOLOGICAL_VARIATION = (

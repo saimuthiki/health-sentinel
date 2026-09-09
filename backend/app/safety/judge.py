@@ -91,7 +91,11 @@ def report_from_judgement(payload: dict[str, Any], text: str) -> SafetyReport:
     if blocked and not findings:
         # Blocked with no usable detail: still block, attributed to the vaguest rule.
         findings.append(
-            SafetyFinding(violation=SafetyViolation.DIAGNOSIS_STATED, excerpt=text, span=(0, len(text)))
+            SafetyFinding(
+                violation=SafetyViolation.DIAGNOSIS_STATED,
+                excerpt=text,
+                span=(0, len(text)),
+            )
         )
     verdict = SafetyVerdict.BLOCKED if blocked else SafetyVerdict.PASS
     return SafetyReport(verdict=verdict, findings=findings, text=text)
@@ -100,7 +104,13 @@ def report_from_judgement(payload: dict[str, Any], text: str) -> SafetyReport:
 class GeminiSafetyJudge:
     """Adjudicates with Gemini 2.5 Flash. Usable as the ``judge`` argument to ``guard``."""
 
-    def __init__(self, client: Any, model: str | None = None, *, task: str = "safety_judge") -> None:
+    def __init__(
+        self,
+        client: Any,
+        model: str | None = None,
+        *,
+        task: str = "safety_judge",
+    ) -> None:
         self._client = client
         self._task = task
         self._model = model

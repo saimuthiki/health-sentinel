@@ -14,19 +14,19 @@ choose foods; the app must never turn one into "take N mg of X" (see ``CLAUDE.md
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
-from typing import Sequence
 
 from app.domain.enums import ActivityLevel, Sex
 from app.domain.models import HealthProfile, NutrientTarget
 
 __all__ = [
+    "ADULT_MIN_AGE",
     "ICMR_2020",
     "NUTRIENT_UNITS",
     "RDA_TABLE",
     "RdaRow",
-    "ADULT_MIN_AGE",
     "resolve_target",
     "resolve_targets",
 ]
@@ -191,9 +191,7 @@ def _applies(
             return False
     if row.activity_band is not None and row.activity_band != band:
         return False
-    if row.pregnancy is not None and bool(row.pregnancy) != pregnant:
-        return False
-    return True
+    return not (row.pregnancy is not None and bool(row.pregnancy) != pregnant)
 
 
 def _specificity(row: RdaRow) -> int:

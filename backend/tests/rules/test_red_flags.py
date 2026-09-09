@@ -54,17 +54,17 @@ def test_the_documented_threshold_set_is_all_present() -> None:
 
 
 def test_thresholds_match_the_pipeline_document() -> None:
-    assert RF.HB_CRITICAL_LOW == Decimal("7.0")
-    assert RF.POTASSIUM_CRITICAL_LOW == Decimal("2.5")
-    assert RF.POTASSIUM_CRITICAL_HIGH == Decimal("6.0")
-    assert RF.SODIUM_CRITICAL_LOW == Decimal("120")
-    assert RF.SODIUM_CRITICAL_HIGH == Decimal("160")
-    assert RF.GLUCOSE_FASTING_CRITICAL_HIGH == Decimal("300")
-    assert RF.PLATELETS_CRITICAL_LOW == Decimal("50")       # 50,000 per uL
-    assert RF.NEUTROPHILS_CRITICAL_LOW == Decimal("500")
-    assert RF.HBA1C_DIABETIC == Decimal("6.5")
-    assert RF.TSH_HIGH == Decimal("10")
-    assert RF.CREATININE_RISE_FRACTION == Decimal("0.30")
+    assert Decimal("7.0") == RF.HB_CRITICAL_LOW
+    assert Decimal("2.5") == RF.POTASSIUM_CRITICAL_LOW
+    assert Decimal("6.0") == RF.POTASSIUM_CRITICAL_HIGH
+    assert Decimal("120") == RF.SODIUM_CRITICAL_LOW
+    assert Decimal("160") == RF.SODIUM_CRITICAL_HIGH
+    assert Decimal("300") == RF.GLUCOSE_FASTING_CRITICAL_HIGH
+    assert Decimal("50") == RF.PLATELETS_CRITICAL_LOW       # 50,000 per uL
+    assert Decimal("500") == RF.NEUTROPHILS_CRITICAL_LOW
+    assert Decimal("6.5") == RF.HBA1C_DIABETIC
+    assert Decimal("10") == RF.TSH_HIGH
+    assert Decimal("0.30") == RF.CREATININE_RISE_FRACTION
 
 
 # --------------------------------------------------------------------- boundaries

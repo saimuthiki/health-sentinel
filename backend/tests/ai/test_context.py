@@ -13,7 +13,15 @@ from app.ai.context import (
     summarise_history,
     with_smaller_budget,
 )
-from app.domain.enums import ActivityLevel, DietType, Escalation, GoalType, ResultStatus, Sex, Stance
+from app.domain.enums import (
+    ActivityLevel,
+    DietType,
+    Escalation,
+    GoalType,
+    ResultStatus,
+    Sex,
+    Stance,
+)
 from app.domain.models import (
     ClassifiedResult,
     FoodItem,
