@@ -29,10 +29,12 @@ app/android/local.properties
 app/android/.gradle/
 app/android/app/debug/
 app/android/app/release/
-# the Flutter tool injects the Gradle wrapper; a properties file without its jar breaks that
+# The Flutter tool injects any wrapper file that is missing, one file at a time, so
+# the version can be pinned in gradle-wrapper.properties (which IS committed) while
+# the script and the binary jar are left to the tool.
 app/android/gradlew
 app/android/gradlew.bat
-app/android/gradle/wrapper/
+app/android/gradle/wrapper/gradle-wrapper.jar
 
 # personal health data — must never be committed
 samples/*

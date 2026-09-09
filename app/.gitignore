@@ -17,12 +17,17 @@ android/.gradle/
 android/captures/
 android/.cxx/
 
-# The Gradle wrapper (gradlew, gradlew.bat and gradle/wrapper/) is injected by the
-# Flutter tool on first build. A wrapper properties file without its matching jar
-# breaks that injection, so neither is committed.
+# The Flutter tool injects the Gradle wrapper on first build, copying any wrapper
+# file that is missing one at a time. So the launcher scripts and the binary jar
+# are left to the tool, while gradle-wrapper.properties is committed to pin the
+# Gradle version -- Flutter's injected default is 8.9.0, which is below the 8.14.0
+# its own Gradle plugin requires.
 android/gradlew
 android/gradlew.bat
-android/gradle/
+# Only the binary jar and the launcher scripts are excluded. gradle-wrapper.properties
+# IS committed: it pins the Gradle version, and the Flutter tool fills in the rest
+# file by file.
+android/gradle/wrapper/gradle-wrapper.jar
 
 # Signing material never enters this repository.
 android/key.properties
