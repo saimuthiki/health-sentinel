@@ -447,7 +447,12 @@ void main() {
       expect(contentType, startsWith('multipart/form-data; boundary='));
 
       final List<int> body = client.bodies.last;
-      final String head = utf8.decode(body.sublist(0, 400));
+      // latin1, not utf8: the first 400 bytes are the part headers followed by the
+      // start of 200 KB of arbitrary binary, which is not valid UTF-8 and made
+      // utf8.decode throw "Unexpected extension byte (at offset 271)". latin1 maps
+      // every byte 0-255 to a character and never throws, which is what reading
+      // ASCII headers out of a binary body needs.
+      final String head = latin1.decode(body.sublist(0, 400));
       expect(head, contains('name="file"'));
       expect(head, contains('filename="august panel.pdf"'));
       expect(head, contains('content-type: application/pdf'));

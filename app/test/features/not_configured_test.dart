@@ -99,6 +99,15 @@ void main() {
 
   testWidgets('offers the way out to sample data, and says it stays on the phone',
       (WidgetTester tester) async {
+    // The screen is a ListView, which builds lazily, and this button sits below
+    // the fold of the 800x600 default test surface -- so it was never built and
+    // find.text saw nothing. Use a phone-shaped surface instead, which is both
+    // what the screen is designed for and enough for the whole column to build.
+    tester.view.physicalSize = const Size(400, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
     await tester.pumpWidget(wrap(const AppConfig()));
     await tester.pump();
 
