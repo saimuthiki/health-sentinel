@@ -176,12 +176,21 @@ class ReportRepository(UserScopedRepository):
 # ------------------------------------------------------------------- row <-> domain
 
 
-def result_to_row(result: ClassifiedResult, *, review_reason: str | None = None) -> dict[str, Any]:
+def result_to_row(result: ClassifiedResult) -> dict[str, Any]:
     """A classified result as a ``lab_results`` row.
 
     ``status`` is written as null for ``UNKNOWN``: the column's CHECK constraint has no
     ``unknown`` member, and "we could not assess this" is exactly what null means. It is
     never written as ``normal``.
+
+    **Only rows that mapped to a biomarker are persisted.** ``lab_results`` has no column
+    for the printed test name or for the reason we are unsure, so a row we could not map
+    would be stored as an empty shell -- a count, with nothing to show the user and
+    nothing to confirm. Unmappable rows are instead recovered on demand by re-running the
+    deterministic normaliser over ``report_extractions.raw_json``, which costs no model
+    call. See :func:`app.ingest.pipeline.review_queue`. This is a schema gap, reported
+    rather than worked around: ``lab_results`` wants a ``printed_test_name`` and a
+    ``review_reason`` column.
     """
     reference = result.reference
     return {
@@ -195,30 +204,6 @@ def result_to_row(result: ClassifiedResult, *, review_reason: str | None = None)
         "needs_review": result.needs_review,
         "confirmed_by_user": False,
         "measured_on": iso(result.measured_on),
-        # Not a column; carried so the API can show the user why we asked.
-        "_review_reason": review_reason or result.review_reason,
-    }
-
-
-def unmapped_row(
-    printed_name: str, value_text: str, unit_text: str | None, reason: str | None
-) -> dict[str, Any]:
-    """A row we refused to interpret. Stored with ``needs_review`` so the user decides.
-
-    ``lab_results_unmapped_needs_review`` in the schema requires exactly this: a row with
-    no ``biomarker_code`` must carry ``needs_review``.
-    """
-    return {
-        "biomarker_code": None,
-        "value": None,
-        "unit": unit_text,
-        "printed_range": None,
-        "status": None,
-        "needs_review": True,
-        "confirmed_by_user": False,
-        "_printed_test_name": printed_name,
-        "_value_text": value_text,
-        "_review_reason": reason,
     }
 
 

@@ -24,7 +24,10 @@ plugins {
     // rewriting app/build.gradle. That migration is worth doing on purpose, with
     // a build to test it against -- not as a side effect of unblocking CI.
     id "com.android.application" version "8.11.1" apply false
-    id "org.jetbrains.kotlin.android" version "2.1.0" apply false
+    // Flutter 3.47 requires Kotlin 2.2.20 or newer. Its Gradle plugin validates
+    // Gradle, then AGP, then Kotlin, and reports only the first failure it finds,
+    // so these three surfaced one build at a time rather than together.
+    id "org.jetbrains.kotlin.android" version "2.2.20" apply false
 }
 
 include ":app"
