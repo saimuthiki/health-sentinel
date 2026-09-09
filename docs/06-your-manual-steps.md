@@ -11,7 +11,7 @@ You pasted your key into a chat, so treat it as public.
 
 1. Open **aistudio.google.com** and sign in.
 2. Click **Get API key** (top left).
-3. Find the key starting `AQ.Ab8RN6K…`, click the **⋮** menu, choose **Delete**.
+3. Find the key you have been using, click the **⋮** menu, choose **Delete**.
 4. Click **Create API key** → choose your project → **Create**.
 5. Copy the new key into a password manager or a note only you can see.
 6. **Do not paste it to me and do not put it in the repo.** You will paste it into Render in
