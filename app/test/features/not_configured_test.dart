@@ -108,16 +108,17 @@ void main() {
     await tester.pumpWidget(wrap(const AppConfig()));
     await tester.pump();
 
-    // The screen is a ListView, so it builds lazily and this button is not built
-    // until it is scrolled near. Enlarging the surface is not a reliable fix --
-    // a narrower surface wraps more text and pushes the button further down, so
-    // any height picked here is a guess. Scrolling to it is height-independent.
-    final Finder button = find.text('Look around with sample data');
-    await tester.scrollUntilVisible(button, 300);
+    // The screen is a ListView, so it builds lazily: anything below the fold has
+    // no element yet and no finder will see it. Scroll to the LAST thing on the
+    // screen -- the note under the button -- which forces everything above it,
+    // the button included, to be built. Scrolling to the button alone left this
+    // note still unbuilt, because it sits below the button.
+    final Finder note = find.textContaining('leaves this phone');
+    await tester.scrollUntilVisible(note, 300);
     await tester.pump();
 
-    expect(button, findsOneWidget);
-    expect(find.textContaining('leaves this phone'), findsOneWidget);
+    expect(note, findsOneWidget);
+    expect(find.text('Look around with sample data'), findsOneWidget);
   });
 
   testWidgets('shows the build command that fixes it',
