@@ -364,4 +364,26 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   });
+
+  testWidgets('HpSectionHeader does not overflow on a narrow phone', (WidgetTester tester) async {
+    // A real RenderFlex overflow was found here at 360dp -- an ordinary phone
+    // width -- because the note had no flex and took its full intrinsic width.
+    // 320dp is narrower still, and the smallest width worth supporting.
+    tester.view.physicalSize = const Size(320, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await pumpOnce(
+      tester,
+      wrapForTest(
+        const HpSectionHeader(
+          title: 'How it is supplied',
+          note: 'at build time, never in the repository',
+        ),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+  });
 }

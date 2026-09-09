@@ -114,7 +114,15 @@ void main() {
     // the button included, to be built. Scrolling to the button alone left this
     // note still unbuilt, because it sits below the button.
     final Finder note = find.textContaining('leaves this phone');
-    await tester.scrollUntilVisible(note, 300);
+    // scrollUntilVisible calls .widget (singular) on the scrollable finder, so it
+    // throws "Bad state: Too many elements" when more than one Scrollable exists.
+    // This screen has the ListView and a SelectableText, which brings its own.
+    // Name the one to drive rather than letting it guess.
+    await tester.scrollUntilVisible(
+      note,
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.pump();
 
     expect(note, findsOneWidget);

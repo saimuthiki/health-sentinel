@@ -37,19 +37,40 @@ class HpSectionHeader extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
+          // Every child that can grow is flexible, and the weights keep the title
+          // roomiest. The note used to be a plain Text with no flex, so on a
+          // narrow phone it took its full intrinsic width, left the title and the
+          // rule fighting over what remained, and the Row overflowed -- caught by
+          // a real RenderFlex overflow at 360dp, which is an ordinary phone width.
           Flexible(
+            flex: 5,
             child: Semantics(
               header: true,
-              child: Text(title, style: HpType.headline.copyWith(color: p.ink)),
+              child: Text(
+                title,
+                style: HpType.headline.copyWith(color: p.ink),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ),
           const SizedBox(width: HpSpacing.md),
+          // The rule is decoration: it gives up its width first.
           Expanded(
             child: Container(height: 1, color: p.hairline),
           ),
           if (note != null) ...<Widget>[
             const SizedBox(width: HpSpacing.md),
-            Text(note!, style: HpType.micro.copyWith(color: p.inkFaint)),
+            Flexible(
+              flex: 4,
+              child: Text(
+                note!,
+                style: HpType.micro.copyWith(color: p.inkFaint),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.end,
+              ),
+            ),
           ],
           if (actionLabel != null) ...<Widget>[
             const SizedBox(width: HpSpacing.xs),
