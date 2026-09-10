@@ -13,6 +13,11 @@ import 'package:healthpulse/features/chat/chat_photo.dart';
 import 'package:healthpulse/features/chat/chat_photo_sheet.dart';
 import 'package:healthpulse/features/chat/chat_screen.dart';
 import 'package:healthpulse/features/chat/chat_thinking_bubble.dart';
+// describeFileTooLarge lives with the report upload, and the assertion below
+// is that a photo too big for chat is refused in exactly the same words as a
+// report too big to upload. One sentence for one situation, wherever it
+// happens.
+import 'package:healthpulse/features/reports/report_upload.dart';
 
 /// The camera in the chat composer, which the owner asked for like this:
 ///
