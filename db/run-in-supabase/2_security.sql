@@ -819,9 +819,30 @@ insert into storage.buckets (id, name, public)
 values ('reports', 'reports', false)
 on conflict (id) do update set public = false;
 
--- Supabase enables RLS on storage.objects by default; this makes it explicit so
--- the file is also correct on a plain Postgres server.
-alter table storage.objects enable row level security;
+-- storage.objects belongs to supabase_storage_admin on a real Supabase project,
+-- so the SQL editor's role cannot ALTER it: doing so fails with
+-- "ERROR: 42501: must be owner of table objects" and, because that is the first
+-- statement after the bucket insert, it takes the four policies below down with
+-- it. Supabase already has RLS enabled on that table, so the ALTER is only
+-- needed on a plain Postgres server used for testing. Do it only when we
+-- actually own the table.
+do $$
+begin
+  if exists (
+    select 1
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'storage'
+      and c.relname = 'objects'
+      and pg_has_role(current_user, c.relowner, 'USAGE')
+  ) then
+    execute 'alter table storage.objects enable row level security';
+    raise notice 'Enabled RLS on storage.objects.';
+  else
+    raise notice 'storage.objects is not ours to alter (Supabase manages it); RLS is already on there.';
+  end if;
+end
+$$;
 
 -- ------------------------------------------------------------- read (own) --
 drop policy if exists "reports_read_own" on storage.objects;

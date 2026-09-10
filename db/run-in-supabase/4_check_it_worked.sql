@@ -30,6 +30,45 @@ where t.schemaname = 'public'
 
 union all
 select
+  'access policies created',
+  count(*)::text || ' of 107',
+  case when count(*) >= 107 then 'PASS' else 'CHECK - run Part 2 again' end
+from pg_policies where schemaname = 'public'
+
+union all
+select
+  'no table is locked with no way in',
+  count(*)::text || ' table(s) have security on but no policy',
+  case when count(*) = 0 then 'PASS' else 'CHECK - run Part 2 again' end
+from pg_tables t
+where t.schemaname = 'public'
+  and exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public' and c.relname = t.tablename and c.relrowsecurity
+  )
+  and not exists (
+    select 1 from pg_policies p
+    where p.schemaname = 'public' and p.tablename = t.tablename
+  )
+
+union all
+select
+  'private reports bucket exists',
+  coalesce((select case when public then 'PUBLIC - wrong' else 'yes, private' end
+            from storage.buckets where id = 'reports'), 'missing'),
+  case when exists (select 1 from storage.buckets where id = 'reports' and public = false)
+       then 'PASS' else 'CHECK - run Part 2 again' end
+
+union all
+select
+  'storage policies created',
+  count(*)::text || ' of 4',
+  case when count(*) >= 4 then 'PASS' else 'CHECK - run Part 2 again' end
+from pg_policies
+where schemaname = 'storage' and tablename = 'objects' and policyname like 'reports_%'
+
+union all
+select
   'biomarkers loaded',
   count(*)::text || ' of 88',
   case when count(*) >= 88 then 'PASS' else 'CHECK - run Part 3 again' end
