@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../data/api/auth_token_provider.dart';
@@ -129,7 +130,7 @@ class SupabaseAuthGateway implements AuthGateway {
       }
       return AuthUser(id: user.id, email: user.email ?? email.trim());
     } on AuthException catch (error) {
-      throw HealthRepositoryException(_explain(error, signingUp: false));
+      throw HealthRepositoryException(explainAuthError(error, signingUp: false));
     }
   }
 
@@ -163,7 +164,7 @@ class SupabaseAuthGateway implements AuthGateway {
         displayName: displayName.trim(),
       );
     } on AuthException catch (error) {
-      throw HealthRepositoryException(_explain(error, signingUp: true));
+      throw HealthRepositoryException(explainAuthError(error, signingUp: true));
     }
   }
 
@@ -211,8 +212,10 @@ class SupabaseAuthGateway implements AuthGateway {
   /// shown: it is written for developers, it changes between versions, and it
   /// occasionally says more about an account than the person in front of the
   /// phone should be told.
-  static String _explain(AuthException error, {required bool signingUp}) {
+  @visibleForTesting
+  static String explainAuthError(AuthException error, {required bool signingUp}) {
     final String hint = error.message.toLowerCase();
+
     if (hint.contains('already registered') ||
         hint.contains('already been registered') ||
         hint.contains('user already exists')) {
@@ -225,18 +228,50 @@ class SupabaseAuthGateway implements AuthGateway {
     if (hint.contains('email not confirmed')) {
       return 'Open the confirmation link we emailed you, then sign in.';
     }
+
+    // Rate limiting BEFORE anything that matches on the word "email". The
+    // provider says "Email rate limit exceeded", which used to fall into the
+    // catch-all below and be reported as a malformed address -- telling someone
+    // to check an address that was perfectly fine.
+    if (hint.contains('rate limit') || hint.contains('too many')) {
+      return 'Too many attempts, or too many confirmation emails, in a short '
+          'time. Wait a few minutes and try again.';
+    }
+
+    // Sign-ups switched off in the project, which is a setting and not
+    // something the person holding the phone can fix by retyping.
+    if (hint.contains('signups not allowed') ||
+        hint.contains('signup is disabled') ||
+        hint.contains('signups are disabled') ||
+        hint.contains('signup disabled')) {
+      return 'New accounts are turned off for this app at the moment. Nothing '
+          'is wrong with what you typed.';
+    }
+
+    // Sending the confirmation email failed. Again: not the address's fault.
+    if (hint.contains('error sending') || hint.contains('smtp')) {
+      return 'We could not send the confirmation email. That is our end, not '
+          'yours. Try again in a few minutes.';
+    }
+
     if (hint.contains('password')) {
       return 'That password will not do. Use at least 8 characters, and '
           'something you have not used elsewhere.';
     }
-    if (hint.contains('email')) {
+
+    // Only phrasings that genuinely mean the ADDRESS is unusable. A bare
+    // contains('email') was far too broad: it swallowed disabled sign-ups,
+    // rate limits and mail-sending failures, and blamed all of them on the
+    // person's typing.
+    if (hint.contains('invalid email') ||
+        hint.contains('email address is invalid') ||
+        hint.contains('email address \"') ||
+        hint.contains('unable to validate email') ||
+        hint.contains('invalid format')) {
       return 'That does not look like an email address we can use. Check it '
           'and try again.';
     }
-    if (hint.contains('rate limit') || hint.contains('too many')) {
-      return 'That is a few too many attempts in a row. Wait a minute and try '
-          'again.';
-    }
+
     return signingUp ? _signUpFailed : _signInFailed;
   }
 }
