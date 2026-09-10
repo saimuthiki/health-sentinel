@@ -68,10 +68,43 @@
             android:value="2" />
     </application>
 
+    <!-- Uploading a report deliberately asks for NO permission at all.
+
+         "Choose a PDF" (file_picker) goes through the system document picker,
+         and "Pick from your gallery" (image_picker) goes through the Android
+         photo picker. In both cases the person chooses the one file themselves
+         and Android hands us a temporary read grant for that file only. Asking
+         for READ_MEDIA_IMAGES on top of that would buy us nothing except a
+         line on the Play Store data-safety form saying we can read every photo
+         on the phone, which we cannot and do not want to.
+
+         "Take a photo" needs no CAMERA permission either. The photo is taken by
+         whichever camera app the person already uses, through an intent, and
+         comes back to us as a file. Worse: image_picker asks for the CAMERA
+         permission at run time only when it finds CAMERA declared here, so
+         declaring it would add a permission prompt that does nothing but stand
+         between somebody and their report. -->
+
     <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT" />
             <data android:mimeType="text/plain" />
+        </intent>
+
+        <!-- image_picker, "Take a photo". From Android 11 onwards an app cannot
+             see which other apps are installed unless it says which kinds it
+             needs to see. The camera opens without this, but the plugin can no
+             longer work out which app it handed the job to, and so cannot grant
+             that app permission to write the picture into our cache - which is
+             where the picture comes back from. A <queries> entry is a
+             visibility declaration, not a permission: it grants nothing, asks
+             the person for nothing, and appears on no data-safety form.
+
+             file_picker declares its own GET_CONTENT entry in the plugin's
+             manifest, and image_picker ships its own FileProvider and
+             provider_paths, so neither needs anything further from us. -->
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
         </intent>
     </queries>
 </manifest>
