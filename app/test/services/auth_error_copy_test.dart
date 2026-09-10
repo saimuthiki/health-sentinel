@@ -94,4 +94,57 @@ void main() {
       expect(signUp(raw), isNot(contains('constraint')));
     });
   });
+
+  group('the machine-readable code is trusted before the prose', () {
+    String byCode(String code, {String message = 'some prose that may change'}) =>
+        SupabaseAuthGateway.explainAuthError(
+          AuthException(message, code: code),
+          signingUp: true,
+        );
+
+    test('email_provider_disabled - the code from a real signup failure', () {
+      // Taken verbatim from the project's auth log:
+      //   "error": "400: Email signups are disabled",
+      //   "error_code": "email_provider_disabled"
+      final String message = byCode(
+        'email_provider_disabled',
+        message: '400: Email signups are disabled',
+      );
+      expect(message, contains('turned off'));
+      expect(message, contains('Nothing is wrong with what you typed'));
+      expect(message, isNot(contains('does not look like an email')));
+    });
+
+    test('the code wins even when the prose would map elsewhere', () {
+      // Prose says "email", which the fallback would have caught. The code says
+      // this is a rate limit. The code is the contract, so it decides.
+      final String message = byCode(
+        'over_email_send_rate_limit',
+        message: 'Email address could not be reached',
+      );
+      expect(message, contains('Too many attempts'));
+      expect(message, isNot(contains('does not look like an email')));
+    });
+
+    test('each code maps to its own sentence', () {
+      expect(byCode('email_exists'), contains('already an account'));
+      expect(byCode('invalid_credentials'), contains('did not match an account'));
+      expect(byCode('email_not_confirmed'), contains('confirmation link'));
+      expect(byCode('weak_password'), contains('password will not do'));
+      expect(byCode('email_address_invalid'), contains('does not look like an email'));
+      expect(byCode('email_address_not_authorized'), contains('allowed list'));
+    });
+
+    test('an unknown code falls through to reading the prose', () {
+      final String message = byCode(
+        'some_code_that_did_not_exist_when_this_was_written',
+        message: 'User already registered',
+      );
+      expect(message, contains('already an account'));
+    });
+
+    test('no code at all still works, which is the older response shape', () {
+      expect(signUp('Email signups are disabled'), contains('turned off'));
+    });
+  });
 }

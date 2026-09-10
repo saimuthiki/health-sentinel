@@ -214,6 +214,38 @@ class SupabaseAuthGateway implements AuthGateway {
   /// phone should be told.
   @visibleForTesting
   static String explainAuthError(AuthException error, {required bool signingUp}) {
+    // Supabase sends a stable machine-readable code alongside the prose. Match
+    // on that first: "Email signups are disabled" is wording that can change
+    // with a release, while `email_provider_disabled` is a contract. Reading the
+    // prose at all is a fallback for older responses that carry no code.
+    switch (error.code) {
+      case 'email_provider_disabled':
+      case 'signup_disabled':
+      case 'provider_disabled':
+        return 'New accounts are turned off for this app at the moment. '
+            'Nothing is wrong with what you typed.';
+      case 'over_email_send_rate_limit':
+      case 'over_request_rate_limit':
+        return 'Too many attempts, or too many confirmation emails, in a short '
+            'time. Wait a few minutes and try again.';
+      case 'email_exists':
+      case 'user_already_exists':
+        return 'There is already an account with that email. Try signing in '
+            'instead.';
+      case 'invalid_credentials':
+        return _signInFailed;
+      case 'email_not_confirmed':
+        return 'Open the confirmation link we emailed you, then sign in.';
+      case 'weak_password':
+        return 'That password will not do. Use at least 8 characters, and '
+            'something you have not used elsewhere.';
+      case 'email_address_invalid':
+        return 'That does not look like an email address we can use. Check it '
+            'and try again.';
+      case 'email_address_not_authorized':
+        return 'That address is not on this app\'s allowed list yet.';
+    }
+
     final String hint = error.message.toLowerCase();
 
     if (hint.contains('already registered') ||
