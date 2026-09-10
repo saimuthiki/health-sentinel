@@ -343,9 +343,15 @@ class Wire {
     final String raw = asString(json['value']).trim();
     final String code = asString(json['biomarker_code']);
     return LabResult(
-      // `ResultOut` carries no row id. The biomarker code is unique within one
-      // report, which is all a list key has to be.
-      id: code,
+      // The row's own id when the API sent one. `ResultOut.id` is null on the
+      // reply to an upload, which is a preview of what was just read rather
+      // than rows read back, so the biomarker code stays as the fallback: it is
+      // unique within one report, which is all a list key has to be.
+      id: asString(json['id'], fallback: code),
+      // The address of the row, and null when there is not one. Only a row with
+      // an id can be confirmed, and the screen checks this rather than sending
+      // something that is not an id at all.
+      rowId: asStringOrNull(json['id']),
       biomarkerCode: code,
       displayName: asString(json['display_name'], fallback: code),
       // Kept for the chart. Never rendered: the screen shows [valueText].

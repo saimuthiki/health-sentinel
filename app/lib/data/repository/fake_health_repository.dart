@@ -48,6 +48,14 @@ class FakeHealthRepository implements HealthRepository {
   /// and is enough for a widget test to prove the right call was made.
   final Map<String, bool> markedPlanItems = <String, bool>{};
 
+  /// The rows whose values have been confirmed, by [LabResult.rowId].
+  ///
+  /// The sample reports are shared by every instance and are never changed, so
+  /// a confirmation is kept here instead and applied on the way out of
+  /// [loadReport]. That is also what a real backend does: the tap sends a
+  /// request, and the screen only changes when the report is read again.
+  final Set<String> confirmedResults = <String>{};
+
   final List<ChatMessage> _messages = <ChatMessage>[
     ChatMessage(
       id: 'm1',
@@ -196,7 +204,68 @@ class FakeHealthRepository implements HealthRepository {
       (HealthReport r) => r.id == reportId,
       orElse: () => _sampleReports.first,
     );
-    return _settle(report);
+    return _settle(_withConfirmations(report));
+  }
+
+  @override
+  Future<void> confirmResult({
+    required String reportId,
+    required String resultId,
+  }) async {
+    confirmedResults.add(resultId);
+    await _settle<void>(null);
+  }
+
+  /// [report] with any confirmed row no longer asking to be checked.
+  ///
+  /// Confirming does not change the value - there is no way to send one - so
+  /// the number, the unit and the printed range are all copied across
+  /// untouched. What changes is that we are no longer asking about it.
+  HealthReport _withConfirmations(HealthReport report) {
+    if (confirmedResults.isEmpty) {
+      return report;
+    }
+    return HealthReport(
+      id: report.id,
+      fileName: report.fileName,
+      status: report.status,
+      reportType: report.reportType,
+      labName: report.labName,
+      collectedOn: report.collectedOn,
+      createdAt: report.createdAt,
+      mimeType: report.mimeType,
+      storagePath: report.storagePath,
+      keepOriginalUntil: report.keepOriginalUntil,
+      headline: report.headline,
+      results: report.results.map(_confirmedRow).toList(),
+      escalations: report.escalations,
+    );
+  }
+
+  LabResult _confirmedRow(LabResult result) {
+    final String? rowId = result.rowId;
+    if (rowId == null || !confirmedResults.contains(rowId)) {
+      return result;
+    }
+    return LabResult(
+      id: result.id,
+      rowId: rowId,
+      biomarkerCode: result.biomarkerCode,
+      displayName: result.displayName,
+      unit: result.unit,
+      status: result.status,
+      value: result.value,
+      valueText: result.valueText,
+      reportId: result.reportId,
+      printedRange: result.printedRange,
+      refLow: result.refLow,
+      refHigh: result.refHigh,
+      needsReview: false,
+      confirmedByUser: true,
+      measuredOn: result.measuredOn,
+      plainLanguage: result.plainLanguage,
+      sourceCitation: result.sourceCitation,
+    );
   }
 
   @override
@@ -611,6 +680,7 @@ class FakeHealthRepository implements HealthRepository {
       results: <LabResult>[
         LabResult(
           id: 'l1',
+          rowId: 'row-l1',
           biomarkerCode: 'vitamin_d',
           displayName: 'Vitamin D (25-OH)',
           value: 18,
@@ -628,6 +698,7 @@ class FakeHealthRepository implements HealthRepository {
         ),
         LabResult(
           id: 'l2',
+          rowId: 'row-l2',
           biomarkerCode: 'hemoglobin',
           displayName: 'Haemoglobin',
           value: 11.8,
@@ -644,6 +715,7 @@ class FakeHealthRepository implements HealthRepository {
         ),
         LabResult(
           id: 'l3',
+          rowId: 'row-l3',
           biomarkerCode: 'hba1c',
           displayName: 'HbA1c',
           value: 5.4,
@@ -658,6 +730,7 @@ class FakeHealthRepository implements HealthRepository {
         ),
         LabResult(
           id: 'l4',
+          rowId: 'row-l4',
           biomarkerCode: 'ferritin',
           displayName: 'Ferritin',
           value: null,
@@ -668,7 +741,7 @@ class FakeHealthRepository implements HealthRepository {
           measuredOn: DateTime(2026, 8, 14),
           plainLanguage:
               'We could not read this one from the scan with confidence, so we '
-              'have not guessed it. Tap to type what your report says.',
+              'have not guessed it. Check it against your printed report.',
         ),
       ],
     ),
@@ -684,6 +757,7 @@ class FakeHealthRepository implements HealthRepository {
       results: <LabResult>[
         LabResult(
           id: 'l5',
+          rowId: 'row-l5',
           biomarkerCode: 'tsh',
           displayName: 'TSH',
           value: 2.3,

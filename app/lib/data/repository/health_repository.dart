@@ -45,6 +45,23 @@ abstract class HealthRepository {
 
   Future<HealthReport> loadReport(String reportId);
 
+  /// Say that a value the report reader was unsure about really is what the
+  /// report says.
+  ///
+  /// `POST /v1/reports/{report_id}/results/{result_id}/confirm` accepts one
+  /// thing: a yes. It clears the "please check this" flag on that row and
+  /// records that a person decided it, not the app. It does **not** carry a
+  /// corrected value, and there is no endpoint that does - so nothing built on
+  /// top of this may look like an edit, or a person will type a number in and
+  /// watch it be thrown away.
+  ///
+  /// [resultId] is [LabResult.rowId], the row's id in the backend's
+  /// `lab_results` table. Nothing else addresses the row.
+  Future<void> confirmResult({
+    required String reportId,
+    required String resultId,
+  });
+
   Future<MealPlan> loadPlan(DateTime date);
 
   /// Record that one item of a plan was eaten, or was not.

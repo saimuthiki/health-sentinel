@@ -373,6 +373,29 @@ class HttpHealthRepository implements HealthRepository, CacheAware {
     return Wire.reportDetailFrom(json);
   }
 
+  /// Confirm one value, and return nothing.
+  ///
+  /// The body carries the single field `ConfirmIn` defines. The reply is a
+  /// receipt naming the row and the answer, and holds nothing the screen does
+  /// not already know, so it is not returned: what the screen shows next comes
+  /// from fetching the report again, which is the only thing that can say what
+  /// the backend actually stored.
+  @override
+  Future<void> confirmResult({
+    required String reportId,
+    required String resultId,
+  }) async {
+    try {
+      await _api.postMap(
+        '/v1/reports/${Uri.encodeComponent(reportId)}'
+        '/results/${Uri.encodeComponent(resultId)}/confirm',
+        body: const <String, dynamic>{'confirmed': true},
+      );
+    } on ApiFailure catch (failure) {
+      throw _wrap(failure);
+    }
+  }
+
   @override
   Future<HealthReport> uploadReport({
     required String fileName,

@@ -220,6 +220,90 @@ def test_confirming_a_value_clears_needs_review(client, auth, store, gemini):
     assert flagged[0]["confirmed_by_user"] is True
 
 
+def test_a_stored_result_carries_the_id_the_confirm_endpoint_needs(client, auth, store, gemini):
+    """Without ``id`` on ``ResultOut`` the app cannot name the row it is confirming.
+
+    The confirm endpoint is addressed by ``lab_results.id``, so a response that omits it
+    leaves the user with a value they can see is wrong and no way to say so.
+    """
+    consented(store)
+    seed_reference(store)
+    gemini.queue(EXTRACTION)
+    report_id = upload(client, auth).json()["report"]["id"]
+
+    body = request(client, "GET", f"/v1/reports/{report_id}", headers=auth).json()
+    ids = {row["id"] for row in body["results"]}
+    assert ids == {str(row["id"]) for row in store.rows("lab_results")}
+    assert None not in ids
+
+    # And the name shown beside it is one a person can check against the paper,
+    # not the internal code.
+    names = {row["display_name"] for row in body["results"]}
+    assert "Vitamin D (25-OH)" in names
+
+    # The id really is the address the confirm endpoint accepts.
+    target = next(row["id"] for row in body["results"])
+    response = request(
+        client,
+        "POST",
+        f"/v1/reports/{report_id}/results/{target}/confirm",
+        headers=auth,
+        json={"confirmed": True},
+    )
+    assert response.status_code == 200, response.text
+
+
+def test_confirming_a_row_that_is_not_yours_is_not_found(client, auth, store, gemini):
+    """Someone else's row is not confirmable through your own report."""
+    from tests.conftest import OTHER_USER_ID
+
+    consented(store)
+    seed_reference(store)
+    gemini.queue(EXTRACTION)
+    report_id = upload(client, auth).json()["report"]["id"]
+
+    store.seed(
+        "lab_results",
+        [{"user_id": OTHER_USER_ID, "report_id": None, "biomarker_code": "HB",
+          "value": "6.2", "unit": "g/dL", "status": "critical_low",
+          "needs_review": True, "confirmed_by_user": False}],
+    )
+    theirs = next(
+        row for row in store.rows("lab_results") if row["user_id"] == OTHER_USER_ID
+    )
+
+    response = request(
+        client,
+        "POST",
+        f"/v1/reports/{report_id}/results/{theirs['id']}/confirm",
+        headers=auth,
+        json={"confirmed": True},
+    )
+    assert response.status_code == 404
+    assert problem(response)["type"].endswith("/not-found")
+    # Untouched: a refusal must not be a write that happened anyway.
+    assert theirs["confirmed_by_user"] is False
+    assert theirs["needs_review"] is True
+
+
+def test_confirming_a_result_that_does_not_exist_is_a_404_not_a_500(client, auth, store, gemini):
+    """A row id that names nothing is the user's mistake, not the server falling over."""
+    consented(store)
+    seed_reference(store)
+    gemini.queue(EXTRACTION)
+    report_id = upload(client, auth).json()["report"]["id"]
+
+    response = request(
+        client,
+        "POST",
+        f"/v1/reports/{report_id}/results/00000000-0000-0000-0000-0000000000ff/confirm",
+        headers=auth,
+        json={"confirmed": True},
+    )
+    assert response.status_code == 404
+    assert problem(response)["title"] != "Internal server error"
+
+
 def test_report_status_is_a_cheap_poll(client, auth, store, gemini):
     consented(store)
     seed_reference(store)

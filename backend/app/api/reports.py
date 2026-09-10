@@ -29,6 +29,7 @@ from app.ingest.files import validate_upload
 from app.ingest.pipeline import IngestResult, IngestService, ReviewItem
 from app.repositories.profiles import ProfileRepository
 from app.repositories.reports import ReportRepository, result_from_row
+from app.rules import normalise as normalise_rules
 from app.rules import red_flags as red_flag_rules
 
 router = APIRouter(prefix="/v1/reports", tags=["reports"])
@@ -60,6 +61,13 @@ class UploadAccepted(BaseModel):
 
 
 class ResultOut(BaseModel):
+    #: ``lab_results.id`` -- the address of this row, and the only way the app can
+    #: name it to ``POST /{report_id}/results/{result_id}/confirm``. Optional because
+    #: the upload response is assembled from the pipeline's own objects rather than
+    #: from rows read back, and inventing an id there would be worse than admitting
+    #: there is not one yet: the app opens the report immediately afterwards, and
+    #: :func:`report_detail` carries the real ids.
+    id: str | None = None
     biomarker_code: str
     display_name: str
     value: str
@@ -289,10 +297,21 @@ def _detail(row: dict[str, Any], result: IngestResult) -> ReportDetail:
 
 
 def _result_out(row: dict[str, Any]) -> ResultOut:
+    """One stored ``lab_results`` row as the app sees it.
+
+    ``display_name`` comes from the biomarker catalogue rather than being the code
+    repeated: a person asked to confirm a row has to be able to read it, and
+    "VITD_25OH" is not something anybody's report says. The catalogue is curated data
+    in :mod:`app.rules.normalise`, not model output. An unknown code falls back to the
+    code itself, which is at least true.
+    """
     status_raw = row.get("status")
+    code = str(row.get("biomarker_code") or "")
+    row_id = row.get("id")
     return ResultOut(
-        biomarker_code=str(row.get("biomarker_code") or ""),
-        display_name=str(row.get("biomarker_code") or ""),
+        id=str(row_id) if row_id else None,
+        biomarker_code=code,
+        display_name=normalise_rules.display_name(code) or code,
         value=str(row.get("value") if row.get("value") is not None else ""),
         unit=str(row.get("unit") or ""),
         status=ResultStatus(status_raw)

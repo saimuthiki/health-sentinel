@@ -235,7 +235,7 @@ reach them.
 | Disclaimer not dismissible on report and plan screens | `HpDisclaimer` has no dismiss affordance and no `onDismiss` parameter, anywhere. Tested. |
 | Urgent findings dominate and cannot be swiped away | `HpEscalationCard`: full width, solid leading bar, square leading edge, the only solid alarm colour in the app, no close button, no `Dismissible`. Tested. |
 | Never diagnose or prescribe | Every placeholder string; `test/safety_copy_test.dart` |
-| Never guess a health number | `LabResult.value` is nullable, renders as `--`, and gets a "Type what your report says" action |
+| Never guess a health number | `LabResult.value` is nullable, renders as `--`, and gets a "Check this against your report" action. The app never fills a value in: the endpoint takes a yes, not an edit |
 | Say where a threshold came from | `sourceCitation` shown on every result and on the escalation card |
 | Consent states plainly what this is not, and that uploads go to Gemini | `ConsentScreen` — two separate switches, neither pre-ticked, version recorded |
 

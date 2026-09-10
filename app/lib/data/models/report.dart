@@ -16,6 +16,7 @@ class LabResult {
     required this.displayName,
     required this.unit,
     required this.status,
+    this.rowId,
     this.value,
     this.valueText,
     this.reportId,
@@ -30,6 +31,17 @@ class LabResult {
   });
 
   final String id;
+
+  /// The id of this row in the backend's `lab_results` table, when there is one.
+  ///
+  /// [id] only has to tell one card apart from another on screen. This is the
+  /// real address of the row, and it is what has to be sent back to confirm a
+  /// value the report reader was not sure about. It is null when the row was
+  /// not read back from storage - the reply to an upload is a preview of what
+  /// was just read, not stored rows - and a value with no row id cannot be
+  /// confirmed, so the screen does not offer to.
+  final String? rowId;
+
   final String biomarkerCode;
   final String displayName;
 
@@ -91,6 +103,10 @@ class LabResult {
 
   factory LabResult.fromJson(Map<String, dynamic> json) => LabResult(
         id: asString(json['id']),
+        // Written by toJson under its own key, never taken from `id`: on the
+        // cache path `id` may only be the biomarker code, and sending that to
+        // the confirm endpoint would name a row that does not exist.
+        rowId: asStringOrNull(json['row_id']),
         biomarkerCode: asString(json['biomarker_code']),
         displayName: asString(json['display_name']),
         value: asDoubleOrNull(json['value']),
@@ -116,6 +132,7 @@ class LabResult {
 
   Map<String, dynamic> toJson() => prune(<String, dynamic>{
         'id': id,
+        'row_id': rowId,
         'biomarker_code': biomarkerCode,
         'display_name': displayName,
         'value': value,

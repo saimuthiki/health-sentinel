@@ -126,7 +126,7 @@ class _Body extends StatelessWidget {
           note: '${report.results.length} measured',
         ),
         for (final LabResult result in report.results) ...<Widget>[
-          _ResultCard(result: result),
+          _ResultCard(reportId: report.id, result: result),
           const SizedBox(height: HpSpacing.md),
         ],
       ],
@@ -134,13 +134,80 @@ class _Body extends StatelessWidget {
   }
 }
 
-class _ResultCard extends StatelessWidget {
-  const _ResultCard({required this.result});
+/// One value, and - when we were not sure of it - the way to say so.
+///
+/// The card holds its own busy flag and its own refusal, because a confirmation
+/// belongs to one row: a failure on the ferritin line must not put an error
+/// across the haemoglobin line above it.
+class _ResultCard extends ConsumerStatefulWidget {
+  const _ResultCard({required this.reportId, required this.result});
 
+  final String reportId;
   final LabResult result;
 
   @override
+  ConsumerState<_ResultCard> createState() => _ResultCardState();
+}
+
+class _ResultCardState extends ConsumerState<_ResultCard> {
+  /// True while the panel asking about this value is open.
+  bool _open = false;
+
+  /// True while the confirmation is with the backend. It blocks a second tap
+  /// and shows the spinner, and it is cleared in a `finally` so no path out of
+  /// here can leave the button spinning for ever.
+  bool _confirming = false;
+
+  /// The last refusal, in our own words, or null.
+  String? _error;
+
+  /// Send the confirmation, and let the screen change only afterwards.
+  ///
+  /// Nothing on this card is altered on the strength of the tap. If the write
+  /// succeeds the report is fetched again and whatever comes back is what is
+  /// shown; a value that says it has been confirmed when the backend never
+  /// heard about it is exactly the lie this app must not tell.
+  Future<void> _confirm(String rowId) async {
+    if (_confirming) {
+      // A second tap while the first is in flight would post the same
+      // confirmation twice.
+      return;
+    }
+    setState(() {
+      _confirming = true;
+      _error = null;
+    });
+
+    String? failure;
+    try {
+      await ref.read(healthRepositoryProvider).confirmResult(
+            reportId: widget.reportId,
+            resultId: rowId,
+          );
+    } catch (error) {
+      failure = explainFailure(
+        error,
+        fallback: 'That could not be saved just now. Nothing has changed - '
+            'try again in a moment.',
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _confirming = false;
+          _error = failure;
+        });
+      }
+    }
+
+    if (failure != null || !mounted) {
+      return;
+    }
+    ref.invalidate(reportProvider(widget.reportId));
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final LabResult result = widget.result;
     final HpPalette p = context.hp;
     final HpSeverity severity = result.status.severity;
 
@@ -175,12 +242,7 @@ class _ResultCard extends StatelessWidget {
           ],
           if (result.needsReview) ...<Widget>[
             const SizedBox(height: HpSpacing.md),
-            HpButton(
-              label: 'Type what your report says',
-              tone: HpButtonTone.secondary,
-              expand: false,
-              onPressed: () {},
-            ),
+            _reviewSection(context, result),
           ],
           const SizedBox(height: HpSpacing.lg),
           Container(height: 1, color: p.hairline),
@@ -200,6 +262,115 @@ class _ResultCard extends StatelessWidget {
               label: 'Range source',
               value: result.sourceCitation!,
             ),
+        ],
+      ),
+    );
+  }
+
+  /// What we show on a row we were not confident about.
+  ///
+  /// Without a row id there is nothing to confirm - the backend addresses these
+  /// by the id of the stored row - so the card says so plainly rather than
+  /// offering a button that could not do anything.
+  Widget _reviewSection(BuildContext context, LabResult result) {
+    final HpPalette p = context.hp;
+    final String? rowId = result.rowId;
+    if (rowId == null) {
+      return Text(
+        'We were not sure about this line. Open this report again to check it '
+        'against the printed copy.',
+        style: HpType.label.copyWith(color: p.inkMuted),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        HpButton(
+          label: _open ? 'Not now' : 'Check this against your report',
+          tone: HpButtonTone.secondary,
+          expand: false,
+          onPressed: _confirming
+              ? null
+              : () => setState(() {
+                    _open = !_open;
+                    _error = null;
+                  }),
+        ),
+        if (_open) _confirmPanel(context, result, rowId),
+      ],
+    );
+  }
+
+  /// The question itself.
+  ///
+  /// It is a question, not a form. The endpoint behind it takes a yes and
+  /// nothing else: there is no way to send a corrected value, so no text field
+  /// is offered that would quietly throw one away. What is shown is what we
+  /// read, and the only answer the app can carry is "that matches".
+  Widget _confirmPanel(BuildContext context, LabResult result, String rowId) {
+    final HpPalette p = context.hp;
+    final String? error = _error;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: HpSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            'What we read from your report',
+            style: HpType.micro.copyWith(color: p.inkFaint),
+          ),
+          const SizedBox(height: HpSpacing.xs),
+          Text(
+            '${result.displayName} — ${result.valueLabel}',
+            style: HpType.bodyStrong.copyWith(color: p.ink),
+          ),
+          const SizedBox(height: HpSpacing.md),
+          Text(
+            'We were not confident enough about this line to rely on it, so it '
+            'is flagged rather than guessed at. Confirming records that it '
+            'matches the paper in front of you. It does not change the value, '
+            'and we will not fill one in for you.',
+            style: HpType.label.copyWith(color: p.inkMuted),
+          ),
+          const SizedBox(height: HpSpacing.md),
+          if (error != null) ...<Widget>[
+            Semantics(
+              liveRegion: true,
+              container: true,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Icon(
+                    Icons.error_outline_rounded,
+                    size: 18,
+                    color: p.urgentInk,
+                  ),
+                  const SizedBox(width: HpSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      error,
+                      style: HpType.label.copyWith(color: p.urgentInk),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: HpSpacing.md),
+          ],
+          HpButton(
+            label: 'Yes, that matches my report',
+            expand: false,
+            busy: _confirming,
+            onPressed: _confirming ? null : () => _confirm(rowId),
+          ),
+          const SizedBox(height: HpSpacing.sm),
+          Text(
+            'If it does not match, leave it as it is and take the printed '
+            'report to your doctor. This app will not type a lab value in for '
+            'you.',
+            style: HpType.micro.copyWith(color: p.inkFaint),
+          ),
         ],
       ),
     );
