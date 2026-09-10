@@ -1,5 +1,3 @@
-import 'json.dart';
-
 /// What we believe about one food, and the three answers that can change it.
 ///
 /// The owner asked for one question — *did you enjoy it?* — with three answers,
@@ -8,6 +6,8 @@ import 'json.dart';
 /// and the numbers below are not arbitrary: each one is the score that makes the
 /// planner behave the way the button's label promises.
 library;
+
+import 'json.dart';
 
 /// The three answers, and the rating each one sends.
 ///
