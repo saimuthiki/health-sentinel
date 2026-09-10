@@ -274,3 +274,47 @@ goes near GitHub or the app; it lives only in Render.
 
 **Order matters:** rotate first, then set this variable. Setting it with the old
 key just means doing it twice.
+
+---
+
+## Troubleshooting — things that have actually happened
+
+### "That is not something this account can open"
+
+The app signs in fine, then every screen refuses. Sign-up says the account
+already exists; sign-in gets a red message. You are locked out of an account that
+really does exist.
+
+**Check first:** open `https://health-sentinel.onrender.com/readyz`.
+
+```json
+{"status":"ready","checks":{"supabase_config":true,"gemini_config":true}}
+```
+
+If `supabase_config` is `false`, that is the whole answer. The backend needs
+**all three** Supabase values — `SUPABASE_URL`, `SUPABASE_ANON_KEY` and
+`SUPABASE_SERVICE_ROLE_KEY`. Two of the three is not enough, and the anon key is
+the one most easily left out because it feels like a client-side value.
+
+It is needed on the server because the backend reads your data with *your* own
+sign-in token, so row level security applies to it exactly as it would to the
+app. Supabase's REST API wants the anon key alongside that token as the `apikey`
+header. Without it PostgREST answers 401, the API turns that into 403, and the
+app says your account cannot open anything — true, and pointing nowhere near a
+missing environment variable.
+
+In Render → Logs, the same fact is on the first line at startup:
+`supabase_configured=False`, now followed by an error naming exactly which
+variables are empty.
+
+### The endpoints are `/healthz` and `/readyz`
+
+Not `/health` and `/ready`. Those 404, which looks like a broken deploy and is
+not one. `/healthz` says only that the process is alive. `/readyz` says it is
+configured, and returns 503 until it is. `/readyz` is the one worth bookmarking.
+
+### The app seems frozen on a button
+
+Almost always the free instance waking up: about 50 seconds, occasionally two
+minutes if a wake-up probe has to be retried. Wake it first by opening
+`/healthz` in a browser, then use the app.
