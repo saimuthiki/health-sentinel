@@ -17,16 +17,20 @@ from app.api.deps import (
     get_audit,
     get_planner,
     get_plans,
+    get_profiles,
     get_reference,
     require_consent,
 )
+from app.api.feedback import movement_minutes_on
 from app.api.guarded import GuardedText, guarded_deterministic
 from app.core.errors import NotFound
 from app.domain.enums import Escalation, MealSlot, SafetyVerdict
 from app.planner.service import PlannerService
 from app.repositories.audit import AuditRepository
 from app.repositories.plans import PlanRepository, plan_item_from_row
+from app.repositories.profiles import ProfileRepository
 from app.repositories.reference import ReferenceRepository
+from app.rules.daily_goals import resolve_hydration_target, resolve_movement_target
 
 router = APIRouter(prefix="/v1/plan", tags=["plan"])
 
@@ -34,6 +38,7 @@ Plans = Annotated[PlanRepository, Depends(get_plans)]
 Reference = Annotated[ReferenceRepository, Depends(get_reference)]
 Planner = Annotated[PlannerService, Depends(get_planner)]
 Audit = Annotated[AuditRepository, Depends(get_audit)]
+Profiles = Annotated[ProfileRepository, Depends(get_profiles)]
 
 
 class PlanItemOut(BaseModel):
@@ -55,7 +60,22 @@ class DayPlanOut(BaseModel):
 
     plan_date: date
     items: list[PlanItemOut] = Field(default_factory=list)
+    #: What the plan says to drink. Not a target -- see ``hydration_target_ml``.
     hydration_ml: int = 0
+    #: This person's daily drinking-water goal, from ``app.rules.daily_goals``. ``null``
+    #: when we will not answer -- pregnancy, or a condition where fluid is a doctor's
+    #: decision -- and ``hydration_target_source`` then carries the reason instead of the
+    #: citation. The app must show the text and no bar in that case, never a default.
+    hydration_target_ml: int | None = None
+    #: Citation for the number above, or the reason there is not one. Deterministic text
+    #: from curated code; no model has ever touched it.
+    hydration_target_source: str = ""
+    movement_target_minutes_per_day: int | None = None
+    #: WHO states the movement target weekly, so this is the number that matters.
+    movement_target_minutes_per_week: int | None = None
+    movement_target_source: str = ""
+    #: Moderate-equivalent minutes logged for ``plan_date``: what fills the bar.
+    movement_minutes_logged: int = 0
     #: The only prose a model writes here, and it went through the safety pipeline.
     rationale: GuardedText
     escalation: Escalation = Escalation.ROUTINE
@@ -71,9 +91,9 @@ class RegenerateIn(BaseModel):
 
 @router.get("/today", response_model=DayPlanOut, summary="Today's plan")
 async def today(
-    plans: Plans, planner: Planner, reference: Reference, audit: Audit
+    plans: Plans, planner: Planner, reference: Reference, audit: Audit, profiles: Profiles
 ) -> DayPlanOut:
-    return await _read_or_generate(date.today(), plans, planner, reference, audit)
+    return await _read_or_generate(date.today(), plans, planner, reference, audit, profiles)
 
 
 @router.post(
@@ -83,11 +103,17 @@ async def today(
     summary="Regenerate a plan",
 )
 async def regenerate(
-    payload: RegenerateIn, plans: Plans, planner: Planner, reference: Reference
+    payload: RegenerateIn,
+    plans: Plans,
+    planner: Planner,
+    reference: Reference,
+    audit: Audit,
+    profiles: Profiles,
 ) -> DayPlanOut:
     """Explicitly ask for a new plan. This is the only route that always calls a model."""
     plan_date = payload.plan_date or date.today()
     planned = await planner.generate(plan_date)
+    goals = await _daily_goals(profiles, audit, plan_date)
     return DayPlanOut(
         plan_date=plan_date,
         items=[
@@ -104,6 +130,7 @@ async def regenerate(
             for index, item in enumerate(planned.plan.items)
         ],
         hydration_ml=planned.plan.hydration_ml,
+        **goals,
         rationale=planned.rationale,
         escalation=planned.escalation,
         safety_verdict=planned.verdict,
@@ -113,10 +140,15 @@ async def regenerate(
 
 @router.get("/{plan_date}", response_model=DayPlanOut, summary="A date's plan")
 async def plan_for_date(
-    plan_date: date, plans: Plans, planner: Planner, reference: Reference, audit: Audit
+    plan_date: date,
+    plans: Plans,
+    planner: Planner,
+    reference: Reference,
+    audit: Audit,
+    profiles: Profiles,
 ) -> DayPlanOut:
     return await _read_or_generate(
-        plan_date, plans, planner, reference, audit, allow_generate=False
+        plan_date, plans, planner, reference, audit, profiles, allow_generate=False
     )
 
 
@@ -129,6 +161,7 @@ async def _read_or_generate(
     planner: PlannerService,
     reference: ReferenceRepository,
     audit: AuditRepository,
+    profiles: ProfileRepository,
     *,
     allow_generate: bool = True,
 ) -> DayPlanOut:
@@ -138,7 +171,7 @@ async def _read_or_generate(
             raise NotFound("There is no plan for that date yet.")
         await planner.generate(plan_date)
         return await _read_or_generate(
-            plan_date, plans, planner, reference, audit, allow_generate=False
+            plan_date, plans, planner, reference, audit, profiles, allow_generate=False
         )
 
     rows = await plans.items_for(str(header.get("id")))
@@ -162,10 +195,34 @@ async def _read_or_generate(
             for row, item in zip(rows, items, strict=False)
         ],
         hydration_ml=await _hydration_for(plan_date, audit),
+        **await _daily_goals(profiles, audit, plan_date),
         rationale=guarded_deterministic(str(header.get("rationale") or "")),
         escalation=Escalation.ROUTINE,
         generated=False,
     )
+
+
+async def _daily_goals(
+    profiles: ProfileRepository, audit: AuditRepository, plan_date: date
+) -> dict[str, object]:
+    """The water and movement half of the Today screen.
+
+    Both targets are resolved by curated Python from a cited guideline
+    (:mod:`app.rules.daily_goals`) and neither has ever been near a model, so they need no
+    safety guard -- the same standing as a reference range. They are attached to the plan
+    response because that is the one call the Today screen already makes for the day.
+    """
+    profile = await profiles.health_profile()
+    hydration = resolve_hydration_target(profile, on=plan_date)
+    movement = resolve_movement_target(profile, on=plan_date)
+    return {
+        "hydration_target_ml": hydration.millilitres,
+        "hydration_target_source": hydration.source,
+        "movement_target_minutes_per_day": movement.minutes_per_day,
+        "movement_target_minutes_per_week": movement.minutes_per_week,
+        "movement_target_source": movement.source,
+        "movement_minutes_logged": await movement_minutes_on(audit, plan_date),
+    }
 
 
 async def _display_names(items: list, reference: ReferenceRepository) -> dict[str, str]:

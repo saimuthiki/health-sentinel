@@ -43,6 +43,33 @@ class AuditRepository(UserScopedRepository):
             limit=limit,
         )
 
+    async def events_since(
+        self, event_type: str, since: datetime, *, limit: int = 500
+    ) -> Rows:
+        """Events of one type recorded at or after ``since``.
+
+        Anything read back out of this trail for a date range needs this rather than
+        ``events(limit=...)``: a plain limit silently truncates a busy week and the caller
+        cannot tell a quiet Tuesday from a page boundary.
+
+        ``occurred_at`` is when the row was written, which is never earlier than the day
+        the event is about -- nothing in this service accepts a future date -- so a window
+        that starts at ``since`` cannot miss a back-dated entry that belongs in it. The
+        caller still filters on the date inside the payload, because an entry written
+        today may be about a day before the window.
+        """
+        return await self.db.select(
+            "health_events",
+            columns="id,event_type,payload,occurred_at",
+            filters={
+                **self._mine,
+                "event_type": eq(event_type),
+                "occurred_at": f"gte.{since.isoformat()}",
+            },
+            order="occurred_at.asc",
+            limit=limit,
+        )
+
     async def ai_run(
         self,
         run: Any,

@@ -207,3 +207,58 @@ internally, so nothing is broken today.
 
 **Needed:** the two files should agree. Preferably rename the seed row to `kcal` and
 delete the alias.
+
+### G15 — The water target is EFSA's, not ICMR-NIN's, and does not move with weight, heat or training
+`app/rules/daily_goals.py` → `TOTAL_WATER_ML`, `DRINKS_SHARE_OF_TOTAL_WATER`,
+`HYDRATION_FLOOR_ML`
+
+Every other target in this project cites ICMR-NIN 2020. This one does not, because an
+ICMR-NIN figure for water intake could not be stated with confidence, and the rule here
+is cite or omit. What ships instead is EFSA's adequate intake of **total** water for
+adults — 2.5 L/day for men, 2.0 L/day for women — times the 80% EFSA attributes to
+drinks rather than to food. So the goal varies by **sex only**.
+
+Three things it deliberately does *not* do, each because we hold no citable figure:
+
+- **Body weight.** EFSA states the intake per adult, not per kilogram. The familiar
+  30–35 mL/kg/day clinical rule of thumb is real but we could not attribute it to a
+  specific guideline with confidence, so an 82 kg man and a 60 kg man currently get the
+  same 2000 mL.
+- **Physical activity.** EFSA scopes its figure to *moderate* activity and says needs
+  rise above it, without giving an amount. Someone playing badminton daily gets no
+  uplift from us.
+- **Climate.** Same: EFSA scopes the figure to *moderate ambient temperature*. A
+  Hyderabad summer gets no uplift either.
+
+The 80% share is the one judgement in the rule: EFSA gives a 70–80% range for drinks
+and we take the top of it, so that a drinking goal is never set below what the source
+supports. That choice is written into the constant rather than folded into a number.
+
+**Needed:** the ICMR-NIN 2020 water figure read off the printed table, and a sourced
+uplift for heat and for exercise — ideally one a dietitian will put their name to. Until
+then the number is defensible but blunt, and the app should not imply it was tailored
+more finely than it was.
+
+### G16 — The movement target is a weekly guideline shown as a daily bar
+`app/rules/daily_goals.py` → `WEEKLY_FLOOR_MINUTES`, `WEEKLY_UPPER_MINUTES`,
+`HIGHER_TARGET_ACTIVITY_LEVELS`
+
+WHO 2020 states 150–300 minutes of moderate-intensity aerobic activity **per week** for
+adults. There is no daily figure in the guideline. The API returns the weekly number as
+the real target and a daily one derived from it (weekly ÷ 7, rounded up), which is a
+display convenience and nothing more.
+
+Two gaps sit underneath it:
+
+- **Who gets 300 rather than 150** is our call, not WHO's. We give the upper end of the
+  range to a profile that already records `active` or `very_active`, on the grounds that
+  WHO names the upper half as where additional benefit is gained. Nothing in the
+  guideline says to allocate it that way.
+- **Under-18s get no target.** WHO's recommendation for 5–17 year olds is a different
+  shape (a daily average, not a weekly total) and we have not curated it, so
+  `resolve_movement_target()` returns `None` below 18. Same stance as G6.
+
+WHO's muscle-strengthening recommendation (2+ days a week) is not modelled at all.
+
+**Needed:** a decision on how the 150–300 range should be allocated, and the 5–17 band
+if the product ever stops being adults-only.
