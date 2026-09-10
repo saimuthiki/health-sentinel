@@ -46,18 +46,36 @@ abstract class OfflineCache {
   static const String account = 'account';
   static const String scheduledAlertsFingerprint = 'alerts.scheduled';
 
-  /// Hydration is the one number the app owns.
+  /// One day's water total, as the **server** last reported it: `{'ml': 2500}`.
   ///
-  /// There is no endpoint for "how much water have I had today" — the API has a
-  /// hydration *target* on the plan and nothing to log against it. Rather than
-  /// invent a server number, the running total is kept here, on the phone,
-  /// per calendar day, and shown as the user's own tally.
+  /// Water is no longer a number this app owns. `POST /v1/feedback/hydration`
+  /// records each drink and the day plan carries the day's total back, so this
+  /// is a copy of the server's answer kept for the train — the same standing as
+  /// [plan] — rather than a tally the phone keeps for itself. The shape is
+  /// unchanged from when it was one, so a row written by an older build still
+  /// reads; what changed is who the number belongs to.
   static String hydrationFor(DateTime date) {
     final String y = date.year.toString().padLeft(4, '0');
     final String m = date.month.toString().padLeft(2, '0');
     final String d = date.day.toString().padLeft(2, '0');
     return 'hydration.$y-$m-$d';
   }
+
+  /// Drinks logged on this phone that have not reached the server yet.
+  ///
+  /// `{'drinks': [{'on': '2026-09-10', 'ml': 250}, ...]}`, oldest first. A glass
+  /// tapped with no signal is appended here, counted in the total on screen
+  /// immediately, and sent with the next write that gets through. Losing it
+  /// quietly is what this app used to do with every glass, and it is the whole
+  /// reason this key exists.
+  ///
+  /// One list for every day rather than one per day, and each entry carries its
+  /// own date: a glass tapped at eleven at night on a train is still owed to
+  /// **that** day when the phone finds signal the next morning, and a per-day
+  /// queue would strand it. Each entry is sent as its own request, because the
+  /// endpoint refuses an implausibly large single drink and a summed queue would
+  /// sooner or later become one.
+  static const String pendingHydration = 'hydration.pending';
 }
 
 /// The real one: one table, one row per key.

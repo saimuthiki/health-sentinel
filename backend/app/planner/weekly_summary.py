@@ -123,8 +123,6 @@ class WeeklySummary:
     facts: WeekFacts
     #: Our own sentences about the week. The substance, always present.
     lines: list[str] = field(default_factory=list)
-    #: What this summary cannot say, and why. Curated copy.
-    not_measured: tuple[str, ...] = rollup.NOT_MEASURED
     #: The model's two or three sentences, or ``None`` when there are none -- a quiet
     #: week, a rails failure, a blocked generation, or no model configured.
     encouragement: GuardedText | None = None
@@ -134,6 +132,17 @@ class WeeklySummary:
     #: True when a model was called during *this* request.
     generated: bool = False
     verdict: SafetyVerdict = SafetyVerdict.PASS
+
+    @property
+    def not_measured(self) -> tuple[str, ...]:
+        """What this summary cannot say for this week, and why. Curated copy.
+
+        Derived from the facts rather than stored beside them, so that the four places
+        :meth:`WeeklySummaryService.summarise` returns from cannot disagree about it --
+        and so that a week which has water in it can never be handed the sentence saying
+        we do not count water.
+        """
+        return rollup.not_measured_for(self.facts)
 
 
 class WeeklySummaryService:
@@ -222,6 +231,7 @@ class WeeklySummaryService:
         since = window.started_at()
         progress = await self.audit.events_since(rollup.PLAN_ITEM_EVENT, since)
         movement = await self.audit.events_since(rollup.MOVEMENT_EVENT, since)
+        hydration = await self.audit.events_since(rollup.HYDRATION_EVENT, since)
         # `logs_between` filters on the start only (its `end` is unused today), so the
         # far edge of the window is applied by the roll-up, which checks every row's own
         # date anyway.
@@ -242,6 +252,7 @@ class WeeklySummaryService:
             movement_events=movement,
             movement_target_minutes_per_week=target.minutes_per_week,
             movement_target_source=target.source,
+            hydration_events=hydration,
             report=note,
         )
 
@@ -412,6 +423,14 @@ def facts_prompt_block(facts: WeekFacts) -> str:
         f"Days they logged a meal: {facts.days_with_a_meal_logged}",
         f"Movement logged: {facts.movement_minutes} minutes on {facts.days_moved} days",
     ]
+    if facts.days_hydrated:
+        # Only when there is water to speak of. A "0 ml on 0 days" line in front of a
+        # model is an invitation to write "you did not drink anything this week", and for
+        # every week before water logging shipped that would be a claim about a person
+        # made out of a missing feature.
+        lines.append(
+            f"Water logged: {facts.hydration_ml} ml on {facts.days_hydrated} days"
+        )
     lines.append(
         "Do not restate any of these figures. Write no digits. The app prints them itself."
     )

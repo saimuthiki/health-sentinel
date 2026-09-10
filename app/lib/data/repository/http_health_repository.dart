@@ -18,7 +18,8 @@ import 'health_repository.dart';
 /// person out, offer a retry, send them back to consent — can, without parsing
 /// a sentence.
 class ApiRepositoryException extends HealthRepositoryException {
-  ApiRepositoryException(this.failure) : super(failure.message);
+  ApiRepositoryException(this.failure, {String? message})
+      : super(message ?? failure.message);
 
   final ApiFailure failure;
 }
@@ -236,6 +237,10 @@ class HttpHealthRepository implements HealthRepository, CacheAware {
   @override
   Future<TodayBriefing> loadToday(DateTime date) async {
     try {
+      // Before anything is read: a glass tapped with no signal last night is
+      // owed to the server, and opening the app is when the signal came back.
+      // Best effort - it can add to the day, and it can never break it.
+      await _flushPendingDrinks();
       final Map<String, dynamic> me = await _api.getMap('/v1/me');
       final Map<String, dynamic> profileJson =
           await _api.getMap('/v1/me/profile');
@@ -264,8 +269,18 @@ class HttpHealthRepository implements HealthRepository, CacheAware {
         displayName: asString(me['display_name'], fallback: _pendingDisplayName),
         wakeTime: profile.wakeTime,
         sleepTime: profile.sleepTime,
-        hydrationMl: await _hydrationTotal(date),
-        hydrationTargetMl: plan.hydrationTargetMl,
+        // The server's figure for the day, plus anything this phone has not
+        // managed to send yet. Not the cache: the cache is now a copy of this
+        // number for when the network is gone, not the number itself.
+        hydrationMl: plan.hydrationLoggedMl + await _pendingTotalFor(date),
+        // The goal, and everything the server says about it. `null` here means
+        // the server will not give a goal for this profile, and that travels
+        // through as null so the screen can show the reason and no bar.
+        hydrationTargetMl: plan.hydrationGoal.millilitres,
+        hydrationTargetSourcedMl: plan.hydrationGoal.sourcedMillilitres,
+        hydrationTargetChosenByUser: plan.hydrationGoal.chosenByUser,
+        hydrationTargetSource: plan.hydrationGoal.source,
+        hydrationTargetCaution: plan.hydrationGoal.caution,
         meals: plan.items,
         escalations: escalations,
         planRationale: plan.rationale,
@@ -273,6 +288,8 @@ class HttpHealthRepository implements HealthRepository, CacheAware {
       );
 
       _fromCache.remove(CacheAware.cacheSubjectToday);
+      // The server's own figure, kept for the train. It is a copy, not a tally.
+      await _writeDayTotal(date, plan.hydrationLoggedMl);
       await _cache.write(
         OfflineCache.plan,
         // Stored without escalations, on purpose. A red flag is a statement
@@ -317,6 +334,10 @@ class HttpHealthRepository implements HealthRepository, CacheAware {
       sleepTime: briefing.sleepTime,
       hydrationMl: briefing.hydrationMl,
       hydrationTargetMl: briefing.hydrationTargetMl,
+      hydrationTargetSourcedMl: briefing.hydrationTargetSourcedMl,
+      hydrationTargetChosenByUser: briefing.hydrationTargetChosenByUser,
+      hydrationTargetSource: briefing.hydrationTargetSource,
+      hydrationTargetCaution: briefing.hydrationTargetCaution,
       movementMinutes: briefing.movementMinutes,
       movementTargetMinutes: briefing.movementTargetMinutes,
       meals: briefing.meals,
@@ -705,30 +726,205 @@ class HttpHealthRepository implements HealthRepository, CacheAware {
 
   // ------------------------------------------------------- hydration, alerts
 
-  /// The one running total the app owns.
+  /// `POST /v1/feedback/hydration` — one drink, recorded on the server.
   ///
-  /// There is no endpoint to log a glass of water against — the plan carries a
-  /// hydration *target* and nothing to count towards it — so the tally lives on
-  /// the phone, per calendar day, and is presented as the user's own count
-  /// rather than as anything the backend computed.
+  /// This used to add the millilitres to the phone's own cache and call nothing
+  /// at all, which meant water was lost on reinstall, invisible on a second
+  /// device, and never seen by the backend — and it is why the weekly summary
+  /// honestly refused to report hydration.
+  ///
+  /// The cache is still here, and it is still the offline path, but it is no
+  /// longer the source of truth. The order is: send anything already queued,
+  /// send this glass, keep the server's total. If the network refuses in a way
+  /// that trying again could fix, the glass is **queued** and counted straight
+  /// away, so somebody tapping "a glass" on a train neither loses it nor is told
+  /// it failed. If the refusal is one replaying could never fix — a signed-out
+  /// session, a body the server will not take — it is thrown, and nothing is
+  /// kept, because keeping it silently on the phone is precisely the bug.
   @override
   Future<double> logHydration(double millilitres) async {
+    final int amount = millilitres.round();
+    if (amount <= 0) {
+      throw const HealthRepositoryException(
+        'There is nothing there to add to today’s water.',
+      );
+    }
     final DateTime today = _now();
-    final double total = await _hydrationTotal(today) + millilitres;
-    await _cache.write(
-      OfflineCache.hydrationFor(today),
-      <String, dynamic>{'ml': total},
+    try {
+      // Queued glasses first, so the server hears about them in the order they
+      // were drunk rather than in the order the signal came back.
+      await _sendPendingDrinks();
+      final int total = await _sendDrink(today, amount);
+      await _writeDayTotal(today, total.toDouble());
+      return total.toDouble() + await _pendingTotalFor(today);
+    } on ApiFailure catch (failure) {
+      if (failure.isRetryable) {
+        return _queueDrink(today, amount);
+      }
+      throw _wrap(failure);
+    }
+  }
+
+  /// `PUT /v1/plan/hydration-target` — this person's own daily water goal.
+  ///
+  /// Nothing about the envelope is decided here. The server stores the number
+  /// exactly as typed, attaches its own warning above the published intake
+  /// range, refuses above its ceiling, and gives no goal at all where fluid
+  /// intake is a doctor's decision; this method sends a number and returns what
+  /// came back. A `null` clears the goal and puts the sourced figure back.
+  ///
+  /// The one place this differs from every other call in this file is the
+  /// refusal. Normally a server sentence is never shown and [ApiFailure] carries
+  /// our own copy instead — see `api_failure.dart` for why. A 422 from *this*
+  /// endpoint is the exception, for the same reason a red flag's `message` is
+  /// shown word for word: the text is deterministic, curated, cited and written
+  /// for the person who typed the number, and our own "something on that form
+  /// was not in a shape we could use" would replace "6500 ml is more than we
+  /// will set a goal for, and here is why" with nothing at all. Only the 422 is
+  /// treated this way, and only when the server actually sent a reason.
+  @override
+  Future<HydrationGoal> setHydrationTarget(int? millilitres) async {
+    try {
+      final Map<String, dynamic> json = await _api.putMap(
+        '/v1/plan/hydration-target',
+        body: Wire.hydrationTargetBody(millilitres),
+      );
+      return Wire.hydrationGoalFrom(json);
+    } on ApiFailure catch (failure) {
+      throw _refusedGoal(failure);
+    }
+  }
+
+  ApiRepositoryException _refusedGoal(ApiFailure failure) {
+    final String reason = (failure.serverDetail ?? '').trim();
+    if (failure.kind != ApiFailureKind.invalidRequest || reason.isEmpty) {
+      return _wrap(failure);
+    }
+    return ApiRepositoryException(failure, message: reason);
+  }
+
+  /// One calendar day as the backend writes one. Never null: [dateToJson] only
+  /// answers null for a null date, and there is none here.
+  static String _dayKey(DateTime date) =>
+      dateToJson(DateTime(date.year, date.month, date.day))!;
+
+  /// One drink, sent. Answers with the day's total as the server now holds it.
+  Future<int> _sendDrink(DateTime day, int millilitres) async {
+    final Map<String, dynamic> json = await _api.postMap(
+      '/v1/feedback/hydration',
+      body: <String, dynamic>{
+        'millilitres': millilitres,
+        // Sent rather than left to default to "today", so a glass queued last
+        // night and sent this morning still lands on last night.
+        'on': _dayKey(day),
+      },
     );
+    return asInt(json['day_total_ml']);
+  }
+
+  /// Send everything queued, oldest first, emptying the queue as it goes.
+  ///
+  /// Each entry is removed **before** its total is written, so a process killed
+  /// between the two loses a number on a bar rather than sending a glass twice.
+  /// A queued drink the server refuses outright is dropped — one bad entry must
+  /// not jam the queue behind it for ever — and the refusal is rethrown, so
+  /// nobody is told it was saved.
+  Future<void> _sendPendingDrinks() async {
+    List<Map<String, dynamic>> queued = await _pendingDrinks();
+    while (queued.isNotEmpty) {
+      final Map<String, dynamic> first = queued.first;
+      final DateTime? on = asDate(first['on']);
+      final int millilitres = asInt(first['ml']);
+      final List<Map<String, dynamic>> rest = queued.sublist(1);
+      if (on == null || millilitres <= 0) {
+        // Not something we can send. It is not evidence of anything either.
+        await _writePendingDrinks(rest);
+        queued = rest;
+        continue;
+      }
+      try {
+        final int total = await _sendDrink(on, millilitres);
+        await _writePendingDrinks(rest);
+        await _writeDayTotal(on, total.toDouble());
+      } on ApiFailure catch (failure) {
+        if (!failure.isRetryable) {
+          // It will never be accepted, so it must not sit at the head of the
+          // queue for ever. Dropped here, and still reported below.
+          await _writePendingDrinks(rest);
+        }
+        rethrow;
+      }
+      queued = rest;
+    }
+  }
+
+  /// Keep a glass that could not be sent, and answer with today's total anyway.
+  Future<double> _queueDrink(DateTime day, int millilitres) async {
+    final DateTime on = DateTime(day.year, day.month, day.day);
+    final List<Map<String, dynamic>> queued = <Map<String, dynamic>>[
+      ...await _pendingDrinks(),
+      <String, dynamic>{'on': _dayKey(on), 'ml': millilitres},
+    ];
+    await _writePendingDrinks(queued);
+    return await _storedDayTotal(on) + await _pendingTotalFor(on);
+  }
+
+  /// Try to empty the queue, and never fail a screen for it.
+  ///
+  /// Called on the way into [loadToday]: opening the app with signal is the
+  /// commonest moment for last night's queued glass to get through, and the
+  /// person did not ask for it, so it must not be able to break the day.
+  Future<void> _flushPendingDrinks() async {
+    try {
+      await _sendPendingDrinks();
+    } on ApiFailure {
+      // Still queued, still counted on screen, tried again next time.
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _pendingDrinks() async {
+    final Cached<Map<String, dynamic>>? stored =
+        await _cache.read(OfflineCache.pendingHydration);
+    if (stored == null) {
+      return <Map<String, dynamic>>[];
+    }
+    return asMapList(stored.value['drinks']);
+  }
+
+  Future<void> _writePendingDrinks(List<Map<String, dynamic>> drinks) async {
+    await _cache.write(
+      OfflineCache.pendingHydration,
+      <String, dynamic>{'drinks': drinks},
+    );
+  }
+
+  /// What is still owed to one day, in millilitres.
+  Future<double> _pendingTotalFor(DateTime date) async {
+    final String key = _dayKey(date);
+    double total = 0;
+    for (final Map<String, dynamic> drink in await _pendingDrinks()) {
+      if (asString(drink['on']) == key) {
+        total += asDouble(drink['ml']);
+      }
+    }
     return total;
   }
 
-  Future<double> _hydrationTotal(DateTime date) async {
+  /// The last total the server gave for this day, or zero if it never has.
+  Future<double> _storedDayTotal(DateTime date) async {
     final Cached<Map<String, dynamic>>? stored =
         await _cache.read(OfflineCache.hydrationFor(date));
     if (stored == null) {
       return 0;
     }
     return asDouble(stored.value['ml']);
+  }
+
+  Future<void> _writeDayTotal(DateTime date, double millilitres) async {
+    await _cache.write(
+      OfflineCache.hydrationFor(date),
+      <String, dynamic>{'ml': millilitres},
+    );
   }
 
   @override

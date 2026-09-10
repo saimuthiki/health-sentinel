@@ -27,6 +27,10 @@ def movement(day: str, minutes: int, intensity: str = "moderate") -> dict:
     return {"payload": {"on": day, "minutes": minutes, "intensity": intensity}}
 
 
+def drink(day: str, millilitres: int) -> dict:
+    return {"payload": {"on": day, "millilitres": millilitres}}
+
+
 # ------------------------------------------------------------------------- the window
 
 
@@ -59,6 +63,7 @@ def test_asking_on_a_monday_gives_the_week_that_just_ended():
 def test_the_event_names_match_the_endpoint_that_writes_them():
     """A rename in ``app.api.feedback`` would otherwise empty this column silently."""
     assert rollup.MOVEMENT_EVENT == feedback.MOVEMENT_EVENT
+    assert rollup.HYDRATION_EVENT == feedback.HYDRATION_EVENT
     assert rollup.PLAN_ITEM_EVENT == "plan_item_progress"
 
 
@@ -215,12 +220,16 @@ def test_every_sentence_this_module_writes_passes_the_safety_validator():
         food_log_rows=[{"logged_at": "2026-09-08T08:00:00+00:00"}],
         movement_events=[movement("2026-09-09", 45)],
         movement_target_minutes_per_week=150,
+        hydration_events=[drink("2026-09-09", 500)],
         report=rollup.report_note([{"status": "high"}], measured_on=date(2026, 8, 1)),
     )
+    dry = rollup.roll_up(WINDOW)
     everything = [
         *rollup.factual_lines(facts),
         *rollup.quiet_week_lines(facts),
-        *rollup.NOT_MEASURED,
+        # Both branches of the not-measured copy, so neither can rot unvalidated.
+        *rollup.not_measured_for(facts),
+        *rollup.not_measured_for(dry),
     ]
     assert everything
     for line in everything:
@@ -240,7 +249,51 @@ def test_the_numbers_a_sentence_may_contain_are_exactly_the_ones_we_counted():
     assert 999 not in facts.numbers
 
 
-def test_hydration_is_named_as_something_we_deliberately_do_not_count():
-    joined = " ".join(rollup.NOT_MEASURED).lower()
-    assert "water" in joined
-    assert "this phone only" in joined
+def test_a_week_with_no_record_of_water_says_that_rather_than_showing_a_zero():
+    """Every week before ``POST /v1/feedback/hydration`` shipped is one of these."""
+    joined = " ".join(rollup.not_measured_for(rollup.roll_up(WINDOW))).lower()
+    assert "water is not counted for this week" in joined
+    assert "no record" in joined
+    # The one thing it must never say. An absence is not a zero.
+    assert "you drank nothing" not in joined
+    assert not any(
+        "water" in line for line in rollup.factual_lines(rollup.roll_up(WINDOW))
+    )
+
+
+def test_a_week_with_water_in_it_is_counted_and_stops_saying_it_is_not():
+    facts = rollup.roll_up(
+        WINDOW,
+        hydration_events=[
+            drink("2026-09-07", 250),
+            drink("2026-09-07", 500),
+            drink("2026-09-09", 250),
+            # Outside the window, and the week before this one is not this one.
+            drink("2026-09-06", 900),
+            # Unreadable, so skipped rather than counted as a zero of anything.
+            {"payload": {"on": "2026-09-08", "millilitres": "a glass"}},
+        ],
+    )
+    assert facts.hydration_ml == 1000
+    assert facts.days_hydrated == 2
+    assert 1000 in facts.numbers
+
+    line = next(line for line in rollup.factual_lines(facts) if "water" in line)
+    assert "1000 millilitres" in line
+    assert "on 2 days" in line
+
+    joined = " ".join(rollup.not_measured_for(facts)).lower()
+    assert "water" not in joined
+    assert "compared with another week" in joined
+
+
+def test_water_on_its_own_days_makes_a_week_active():
+    """A glass is a logged thing, so it counts towards a week being worth talking about."""
+    facts = rollup.roll_up(
+        WINDOW,
+        hydration_events=[drink("2026-09-07", 250), drink("2026-09-09", 250)],
+    )
+    assert facts.days_hydrated == 2
+    assert facts.active_days == 2
+    assert facts.signals == 2
+    assert not facts.is_quiet

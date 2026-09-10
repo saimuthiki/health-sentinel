@@ -1,4 +1,5 @@
-"""What the user actually did: meals logged, ratings given, plan items done or skipped.
+"""What the user actually did: meals logged, ratings given, plan items done or skipped,
+movement logged, water drunk.
 
 This is the observed layer of the learning loop (docs/04-ai-pipeline.md). It is pure
 arithmetic -- a rating moves a preference score, nothing here asks a model anything.
@@ -68,6 +69,18 @@ MAX_MOVEMENT_MINUTES = 600
 #: How many days a movement summary may span in one request.
 MAX_MOVEMENT_WINDOW_DAYS = 92
 DEFAULT_MOVEMENT_WINDOW_DAYS = 7
+
+#: The audit event type one drink of water is written as. Read back by this module, by
+#: ``app.api.plan`` for the Today bar and by ``app.rules.weekly_rollup`` for the week;
+#: nothing else should know the spelling.
+HYDRATION_EVENT = "hydration_logged"
+
+#: A single drink larger than this is far more likely to be a slipped finger (3000 for
+#: 300) than something anybody drank in one go, and one bad entry would swamp the day.
+#: Refused rather than clamped, for the same reason :data:`MAX_MOVEMENT_MINUTES` is: a
+#: number quietly changed on the way in is a number the person cannot correct. It is the
+#: same ceiling the app's own "Other amount" sheet offers, so the two agree.
+MAX_HYDRATION_ENTRY_ML = 2000
 
 
 class LogMealIn(BaseModel):
@@ -503,3 +516,112 @@ def _movement_entry(payload: Any) -> tuple[date, int, str] | None:
         return None
     intensity = str(payload.get("intensity") or "moderate")
     return on, minutes, intensity
+
+
+# -------------------------------------------------------------------------- hydration
+
+
+class LogHydrationIn(BaseModel):
+    """One drink the user actually had.
+
+    No ``user_id``, for the same two reasons :class:`LogMovementIn` has none: ``extra=
+    "forbid"`` refuses one if it is sent, and the row is written by
+    :class:`AuditRepository` under the caller's own id with the caller's own token, so
+    logging into somebody else's day is refused twice.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    millilitres: int = Field(ge=1, le=MAX_HYDRATION_ENTRY_ML)
+    #: The day the drink happened, for logging last night's glass this morning.
+    #: Defaults to today; a future date is refused.
+    on: date | None = None
+
+
+class LogHydrationOut(BaseModel):
+    on: date
+    millilitres: int
+    #: The whole day's total after this entry, so the bar can move without a second call.
+    day_total_ml: int
+
+
+@router.post(
+    "/hydration",
+    response_model=LogHydrationOut,
+    status_code=201,
+    summary="Log a drink of water",
+)
+async def log_hydration(payload: LogHydrationIn, audit: Audit) -> LogHydrationOut:
+    """Record one drink.
+
+    **Here, beside movement, rather than with the plan.** This router is the observed
+    layer -- what the user actually did -- and a glass of water is that. ``app.api.plan``
+    is what we *suggested* and what we think the goal should be: ``hydration_ml`` is the
+    figure the planner asked for and ``PUT /v1/plan/hydration-target`` is the goal itself.
+    Putting a drink there would put "what was asked of you" and "what you did" behind one
+    prefix, and the two must never be confused -- confusing them is precisely why the
+    weekly summary refused to report hydration at all.
+
+    It goes into the append-only ``health_events`` trail for the same reason
+    :func:`log_movement` and :func:`mark_plan_item` do: **there is no hydration table**,
+    the schema is applied to a live database, and inventing a migration is not this
+    change's to make. The trail is already where this project records "what the user did"
+    facts with no column of their own, it is user-scoped and RLS-protected, and it is
+    append-only -- so a glass cannot be quietly rewritten later. ``health_events`` has no
+    CHECK on ``event_type``, so a new type needs no migration.
+
+    Only the raw millilitres are stored. Nothing is derived on the way in, so there is no
+    frozen arithmetic to correct later.
+    """
+    on = payload.on or date.today()
+    if on > date.today():
+        raise ValidationFailed("We cannot log a drink for a day that has not happened yet.")
+
+    await audit.event(
+        HYDRATION_EVENT,
+        {"on": on.isoformat(), "millilitres": payload.millilitres},
+    )
+
+    return LogHydrationOut(
+        on=on,
+        millilitres=payload.millilitres,
+        day_total_ml=await hydration_logged_on(audit, on),
+    )
+
+
+async def hydration_logged_on(audit: AuditRepository, on: date) -> int:
+    """Millilitres of water logged for one day. The figure the Today bar fills.
+
+    Lives here rather than in :mod:`app.api.plan` so that the write shape and every read
+    of it have exactly one owner -- the arrangement :func:`movement_minutes_on` already
+    has.
+    """
+    since = datetime.combine(on, time.min, tzinfo=UTC)
+    total = 0
+    for row in await audit.events_since(HYDRATION_EVENT, since):
+        parsed = _hydration_entry(row.get("payload"))
+        if parsed is None:
+            continue
+        day, millilitres = parsed
+        if day == on:
+            total += millilitres
+    return total
+
+
+def _hydration_entry(payload: Any) -> tuple[date, int] | None:
+    """One stored payload, or ``None`` if it is not one we can read.
+
+    An unreadable row is skipped rather than guessed at, and never counted as zero
+    millilitres of something -- the same stance :func:`_movement_entry` and
+    ``app.api.plan._hydration_for`` take.
+    """
+    if not isinstance(payload, dict):
+        return None
+    try:
+        on = date.fromisoformat(str(payload.get("on")))
+        millilitres = int(payload.get("millilitres"))
+    except (TypeError, ValueError):
+        return None
+    if millilitres <= 0:
+        return None
+    return on, millilitres

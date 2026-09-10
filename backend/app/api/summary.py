@@ -108,8 +108,11 @@ class WeeklySummaryOut(BaseModel):
     prose_source: Literal["model", "computed", "quiet"] = "quiet"
     #: Our own sentences about the week, built from ``facts``. Always present.
     lines: list[GuardedText] = Field(default_factory=list)
-    #: What this summary cannot say, and why -- hydration above all, which is tallied on
-    #: the phone and never sent to us.
+    #: What this summary cannot say about *this* week, and why. Hydration was the
+    #: standing example until drinks started reaching the server; it now appears here
+    #: only for a week that genuinely has no record of any, which is what every week
+    #: before that change looks like. Derived from the facts rather than fixed, so the
+    #: sentences and the numbers cannot drift apart.
     not_measured: list[GuardedText] = Field(default_factory=list)
     facts: WeekFactsOut = Field(default_factory=WeekFactsOut)
     #: True when a model was called during this request.

@@ -106,7 +106,11 @@ class TodayBriefing {
     this.wakeTime = '06:30',
     this.sleepTime = '22:30',
     this.hydrationMl = 0,
-    this.hydrationTargetMl = 2500,
+    this.hydrationTargetMl,
+    this.hydrationTargetSourcedMl,
+    this.hydrationTargetChosenByUser = false,
+    this.hydrationTargetSource = '',
+    this.hydrationTargetCaution = '',
     this.movementMinutes = 0,
     this.movementTargetMinutes = 30,
     this.meals = const <MealPlanItem>[],
@@ -120,8 +124,33 @@ class TodayBriefing {
   final String displayName;
   final String wakeTime;
   final String sleepTime;
+
+  /// Millilitres of water logged for this day. The server's figure, plus
+  /// anything logged on this phone that has not reached it yet.
   final double hydrationMl;
-  final double hydrationTargetMl;
+
+  /// The daily water goal in force, and **null when the server will not give
+  /// one** - pregnancy, or a condition where fluid is a doctor's decision.
+  ///
+  /// It used to default to 2500, which was a number nobody computed shown as
+  /// though somebody had. There is no default any more: no goal means no bar,
+  /// and [hydrationTargetSource] carries the reason instead of a citation.
+  final double? hydrationTargetMl;
+
+  /// What the published guideline says for this profile, sent whatever the
+  /// person chose, so the evidence stays visible beside the choice.
+  final double? hydrationTargetSourcedMl;
+
+  /// True when the goal is one this person set for themselves.
+  final bool hydrationTargetChosenByUser;
+
+  /// The citation behind the goal, or the reason there is not one.
+  final String hydrationTargetSource;
+
+  /// The warning attached to a chosen goal above the published range, empty
+  /// when there is nothing to say. Server text, shown verbatim.
+  final String hydrationTargetCaution;
+
   final int movementMinutes;
   final int movementTargetMinutes;
   final List<MealPlanItem> meals;
@@ -132,6 +161,19 @@ class TodayBriefing {
 
   bool get hasEscalation => escalations.isNotEmpty;
 
+  /// The five `hydrationTarget*` fields as the one object screens render.
+  ///
+  /// They are flat on this class because the Today screen has always passed
+  /// `briefing.hydrationTargetMl` down to the water card, and they arrive flat
+  /// on the wire; this getter is what saves the card from unpacking them again.
+  HydrationGoal get hydrationGoal => HydrationGoal(
+        millilitres: hydrationTargetMl,
+        sourcedMillilitres: hydrationTargetSourcedMl,
+        chosenByUser: hydrationTargetChosenByUser,
+        source: hydrationTargetSource,
+        caution: hydrationTargetCaution,
+      );
+
   factory TodayBriefing.fromJson(Map<String, dynamic> json) => TodayBriefing(
         date: asDate(json['date']) ??
             DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
@@ -139,8 +181,13 @@ class TodayBriefing {
         wakeTime: asString(json['wake_time'], fallback: '06:30'),
         sleepTime: asString(json['sleep_time'], fallback: '22:30'),
         hydrationMl: asDouble(json['hydration_ml']),
-        hydrationTargetMl:
-            asDouble(json['hydration_target_ml'], fallback: 2500),
+        hydrationTargetMl: asDoubleOrNull(json['hydration_target_ml']),
+        hydrationTargetSourcedMl:
+            asDoubleOrNull(json['hydration_target_sourced_ml']),
+        hydrationTargetChosenByUser:
+            asBool(json['hydration_target_chosen_by_user']),
+        hydrationTargetSource: asString(json['hydration_target_source']),
+        hydrationTargetCaution: asString(json['hydration_target_caution']),
         movementMinutes: asInt(json['movement_minutes']),
         movementTargetMinutes:
             asInt(json['movement_target_minutes'], fallback: 30),
@@ -160,6 +207,10 @@ class TodayBriefing {
         'sleep_time': sleepTime,
         'hydration_ml': hydrationMl,
         'hydration_target_ml': hydrationTargetMl,
+        'hydration_target_sourced_ml': hydrationTargetSourcedMl,
+        'hydration_target_chosen_by_user': hydrationTargetChosenByUser,
+        'hydration_target_source': hydrationTargetSource,
+        'hydration_target_caution': hydrationTargetCaution,
         'movement_minutes': movementMinutes,
         'movement_target_minutes': movementTargetMinutes,
         'meals': meals.map((MealPlanItem m) => m.toJson()).toList(),

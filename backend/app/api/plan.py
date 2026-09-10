@@ -21,7 +21,7 @@ from app.api.deps import (
     get_reference,
     require_consent,
 )
-from app.api.feedback import movement_minutes_on
+from app.api.feedback import hydration_logged_on, movement_minutes_on
 from app.api.guarded import GuardedText, guarded_deterministic
 from app.core.errors import NotFound, NotReady, ValidationFailed
 from app.domain.enums import Escalation, MealSlot, SafetyVerdict
@@ -68,8 +68,13 @@ class DayPlanOut(BaseModel):
 
     plan_date: date
     items: list[PlanItemOut] = Field(default_factory=list)
-    #: What the plan says to drink. Not a target -- see ``hydration_target_ml``.
+    #: What the plan says to drink. Not a target -- see ``hydration_target_ml`` -- and
+    #: not what anybody drank either, which is ``hydration_logged_ml``.
     hydration_ml: int = 0
+    #: Millilitres of water actually logged for ``plan_date``, folded out of the
+    #: ``hydration_logged`` rows ``POST /v1/feedback/hydration`` writes. What fills the
+    #: water bar. Zero means nothing was logged, which is not the same as nothing drunk.
+    hydration_logged_ml: int = 0
     #: This person's daily drinking-water goal, from ``app.rules.daily_goals``. ``null``
     #: when we will not answer -- pregnancy, or a condition where fluid is a doctor's
     #: decision -- and ``hydration_target_source`` then carries the reason instead of the
@@ -329,12 +334,15 @@ async def _read_or_generate(
 async def _daily_goals(
     profiles: ProfileRepository, audit: AuditRepository, plan_date: date
 ) -> dict[str, object]:
-    """The water and movement half of the Today screen.
+    """The water and movement half of the Today screen: the two goals, and the two
+    figures logged against them.
 
     Both targets are resolved by curated Python from a cited guideline
     (:mod:`app.rules.daily_goals`) and neither has ever been near a model, so they need no
     safety guard -- the same standing as a reference range. They are attached to the plan
-    response because that is the one call the Today screen already makes for the day.
+    response because that is the one call the Today screen already makes for the day, and
+    the two logged figures ride along for the same reason: the bar and the number in it
+    should not need two round trips and cannot then disagree.
     """
     profile = await profiles.health_profile()
     hydration = resolve_hydration_target(profile, on=plan_date)
@@ -349,6 +357,7 @@ async def _daily_goals(
         "movement_target_minutes_per_week": movement.minutes_per_week,
         "movement_target_source": movement.source,
         "movement_minutes_logged": await movement_minutes_on(audit, plan_date),
+        "hydration_logged_ml": await hydration_logged_on(audit, plan_date),
     }
 
 

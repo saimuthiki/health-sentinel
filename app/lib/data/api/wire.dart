@@ -233,10 +233,18 @@ class Wire {
       rationale: _nonEmpty(asString(json['rationale'])),
       status: 'active',
       items: items,
-      // `hydration_ml` is the day's target, read back from the audit row the
-      // planner wrote. It is zero when the backend has none, and zero is passed
-      // through: the model's 2500 default would be a number nobody computed.
+      // `hydration_ml` is what the plan *asked* for, read back from the audit
+      // row the planner wrote. It is zero when the backend has none, and zero is
+      // passed through: the model's 2500 default would be a number nobody
+      // computed. It is neither the goal nor what anybody drank - those are the
+      // two fields below, and keeping the three apart is the whole of this fix.
       hydrationTargetMl: asDouble(json['hydration_ml']),
+      // What the server says was actually drunk on this date, summed from the
+      // drinks `POST /v1/feedback/hydration` recorded.
+      hydrationLoggedMl: asDouble(json['hydration_logged_ml']),
+      // The goal and everything the server says about it, straight off the same
+      // response. Null millilitres is an answer - see [HydrationGoal].
+      hydrationGoal: hydrationGoalFrom(json),
       // The API returns no day totals and no ICMR targets. Working them out
       // here would mean adding up nutrient numbers on the client, which is the
       // one thing CLAUDE.md says the client must never do.
@@ -266,6 +274,29 @@ class Wire {
       timeOfDay: mealTimes[slot.wire],
     );
   }
+
+  /// The five `hydration_target_*` keys, wherever they arrive.
+  ///
+  /// The day plan carries them and so does the reply to
+  /// `PUT /v1/plan/hydration-target`, under exactly the same names, so there is
+  /// one reader for both. Nothing is defaulted and nothing is judged here: a
+  /// null target is passed through as null, and the caution and the citation are
+  /// copied across as the server wrote them. Deciding on the phone whether a
+  /// goal deserves a warning would put a second, uncited copy of a clinical
+  /// judgement in the app.
+  static HydrationGoal hydrationGoalFrom(Map<String, dynamic> json) =>
+      HydrationGoal.fromJson(json);
+
+  /// The body for `PUT /v1/plan/hydration-target`.
+  ///
+  /// Not built with [prune], which is the habit everywhere else in this file.
+  /// `HydrationTargetIn` reads `millilitres: int | None`, and a **null sent on
+  /// purpose** is what clears a chosen goal and puts the sourced figure back. If
+  /// the key were dropped the request would still be valid and would still mean
+  /// "clear it" today - but it would be relying on a server default to say
+  /// something this app meant to say out loud.
+  static Map<String, dynamic> hydrationTargetBody(int? millilitres) =>
+      <String, dynamic>{'millilitres': millilitres};
 
   /// The portion, printed exactly as the number arrived.
   ///

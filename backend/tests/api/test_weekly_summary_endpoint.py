@@ -115,8 +115,12 @@ def test_a_quiet_week_still_says_what_it_cannot_measure(wired, client, auth, sto
     seed_profile(store)
     body = get(client, auth).json()
     joined = " ".join(body["not_measured"]).lower()
-    assert "water" in joined
-    assert "this phone only" in joined
+    # No water was logged that week, so the summary says it has no record of any --
+    # which is what every week before hydration logging shipped looks like. It never
+    # reports the absence as a zero.
+    assert "water is not counted for this week" in joined
+    assert "no record" in joined
+    assert "compared with another week" in joined
 
 
 # ------------------------------------------------------------------- the real week

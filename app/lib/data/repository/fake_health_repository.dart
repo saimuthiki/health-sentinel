@@ -33,6 +33,26 @@ class FakeHealthRepository implements HealthRepository {
   HealthProfile? _profile;
   double _hydrationMl = 900;
 
+  /// The sample water goal, and the goal a test set through
+  /// [setHydrationTarget].
+  ///
+  /// The fake never judges a number. The envelope - warn above the published
+  /// range, refuse above the ceiling, no goal at all where fluid intake is a
+  /// doctor's decision - lives in `backend/app/rules/daily_goals.py` with the
+  /// citations that justify it, and a fake that invented a second copy of that
+  /// text in Dart would be exactly the duplication the real card refuses to do.
+  /// So this stores what it is given, keeps the sourced figure beside it, and
+  /// says nothing about it. A test that needs a caution or a refusal supplies
+  /// its own, which is honest: it is test data, not clinical copy.
+  HydrationGoal _hydrationGoal = const HydrationGoal(
+    millilitres: 2600,
+    sourcedMillilitres: 2600,
+    source: 'Sample data: the figure our sources support for this profile.',
+  );
+
+  /// Every goal handed to [setHydrationTarget], in order. `null` is a clear.
+  final List<int?> hydrationTargetCalls = <int?>[];
+
   /// The reminders as they stand, so a toggle made on the reminders screen is
   /// still there when the screen is opened again. Started from the sample list
   /// with the quiet-hours flags worked out, which is what the backend sends.
@@ -214,7 +234,11 @@ class FakeHealthRepository implements HealthRepository {
         wakeTime: _profile?.wakeTime ?? '06:15',
         sleepTime: _profile?.sleepTime ?? '22:45',
         hydrationMl: _hydrationMl,
-        hydrationTargetMl: 2600,
+        hydrationTargetMl: _hydrationGoal.millilitres,
+        hydrationTargetSourcedMl: _hydrationGoal.sourcedMillilitres,
+        hydrationTargetChosenByUser: _hydrationGoal.chosenByUser,
+        hydrationTargetSource: _hydrationGoal.source,
+        hydrationTargetCaution: _hydrationGoal.caution,
         movementMinutes: 18,
         movementTargetMinutes: 40,
         meals: _sampleMeals,
@@ -315,6 +339,8 @@ class FakeHealthRepository implements HealthRepository {
             'lighter — you told me you eat late on Thursdays.',
         items: _sampleMeals,
         hydrationTargetMl: 2600,
+        hydrationLoggedMl: _hydrationMl,
+        hydrationGoal: _hydrationGoal,
         dayNutrients: const <String, double>{
           'kcal': 1980,
           'protein_g': 68,
@@ -548,6 +574,30 @@ class FakeHealthRepository implements HealthRepository {
   Future<double> logHydration(double millilitres) {
     _hydrationMl += millilitres;
     return _settle(_hydrationMl);
+  }
+
+  /// Store the goal and hand back what a server would say about it.
+  ///
+  /// Deliberately no envelope: see [_hydrationGoal]. `null` clears the goal and
+  /// puts the sourced figure back, which is what the real endpoint does.
+  @override
+  Future<HydrationGoal> setHydrationTarget(int? millilitres) {
+    hydrationTargetCalls.add(millilitres);
+    final double sourced = _hydrationGoal.sourcedMillilitres ?? 2600;
+    _hydrationGoal = millilitres == null
+        ? HydrationGoal(
+            millilitres: sourced,
+            sourcedMillilitres: sourced,
+            source: 'Sample data: the figure our sources support for this '
+                'profile.',
+          )
+        : HydrationGoal(
+            millilitres: millilitres.toDouble(),
+            sourcedMillilitres: sourced,
+            chosenByUser: true,
+            source: 'Sample data: you set this goal yourself.',
+          );
+    return _settle(_hydrationGoal);
   }
 
   @override

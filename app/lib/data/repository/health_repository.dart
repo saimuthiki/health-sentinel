@@ -176,8 +176,37 @@ abstract class HealthRepository {
 
   Future<ChatMessage> sendMessage(String text, {List<String> attachments});
 
-  /// Adds to today's hydration total and returns the new total in millilitres.
+  /// Record one drink, and get today's total back in millilitres.
+  ///
+  /// The drink goes to the server - `POST /v1/feedback/hydration` - so that it
+  /// survives a reinstall and shows up on a second device. The total that comes
+  /// back is the server's, which is what makes it the same number on every
+  /// phone this account opens.
+  ///
+  /// **With no signal the glass is queued, not lost.** A drink that cannot be
+  /// sent is kept on the device against today's date and included in the total
+  /// straight away, then sent with the next successful write. Only a refusal
+  /// that replaying could never fix - a signed-out session, a rejected body -
+  /// is reported as not saved, and then nothing is kept, because a glass held
+  /// on the phone for ever while the screen says it was saved is the bug this
+  /// method was written to fix.
   Future<double> logHydration(double millilitres);
+
+  /// Set this person's own daily water goal, or clear it with null.
+  ///
+  /// `PUT /v1/plan/hydration-target`. Everything about what is allowed lives on
+  /// the server (`backend/app/rules/daily_goals.py`): the number is stored
+  /// exactly as typed, a goal above the published intake range comes back with
+  /// a warning attached, one above the ceiling is refused with its reason, and
+  /// a profile where fluid intake is a doctor's decision gets no goal at all.
+  ///
+  /// Nothing here or above it may re-implement any of that. The reply is
+  /// rendered as it arrives - the warning included, word for word - because the
+  /// text carries literature citations and lives in one place on purpose. A
+  /// refusal is thrown as a [HealthRepositoryException] carrying the server's
+  /// own reason, so the person is told what was actually wrong with the number
+  /// they chose rather than "that did not work".
+  Future<HydrationGoal> setHydrationTarget(int? millilitres);
 
   /// The reminders the phone should schedule for itself.
   ///

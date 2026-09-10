@@ -70,6 +70,71 @@ class MealPlanItem {
       });
 }
 
+/// The daily drinking-water goal, exactly as the server describes it.
+///
+/// Every field here is the server's answer. Nothing in this class is computed,
+/// defaulted or judged on the phone, and that is the point of it existing at
+/// all: the goal, the figure our sources support, whether the person chose it
+/// themselves, the citation behind it and the warning attached to it are all
+/// decided in one place - `backend/app/rules/daily_goals.py`, which carries the
+/// literature references (IOM 2005, Hew-Butler 2015, Noakes 2001). The app
+/// renders what it is sent and never composes a second version of it.
+///
+/// [millilitres] is **null when the server will not give a goal** - pregnancy,
+/// or a condition where fluid intake is a doctor's decision. That is a real
+/// answer, not a missing one: [source] then carries the reason instead of the
+/// citation, and a screen must show the reason and no bar rather than falling
+/// back to a number of its own.
+///
+/// The same five keys arrive on the day plan and on the reply to
+/// `PUT /v1/plan/hydration-target`, so one class reads both.
+class HydrationGoal {
+  const HydrationGoal({
+    this.millilitres,
+    this.sourcedMillilitres,
+    this.chosenByUser = false,
+    this.source = '',
+    this.caution = '',
+  });
+
+  /// The goal in force, or null when there is deliberately not one.
+  final double? millilitres;
+
+  /// What the published guideline says for this profile, sent whatever the
+  /// person chose, so the evidence can stay visible beside the choice.
+  final double? sourcedMillilitres;
+
+  /// True when [millilitres] is a goal this person set rather than ours.
+  final bool chosenByUser;
+
+  /// The citation for the number, or the reason there is not one. Deterministic
+  /// text from curated code; no model has ever touched it.
+  final String source;
+
+  /// The plain warning attached to a chosen goal above the published range, or
+  /// empty when there is nothing to say. Shown verbatim, never rewritten.
+  final String caution;
+
+  /// Whether there is a goal to draw a bar against at all.
+  bool get hasTarget => millilitres != null;
+
+  factory HydrationGoal.fromJson(Map<String, dynamic> json) => HydrationGoal(
+        millilitres: asDoubleOrNull(json['hydration_target_ml']),
+        sourcedMillilitres: asDoubleOrNull(json['hydration_target_sourced_ml']),
+        chosenByUser: asBool(json['hydration_target_chosen_by_user']),
+        source: asString(json['hydration_target_source']),
+        caution: asString(json['hydration_target_caution']),
+      );
+
+  Map<String, dynamic> toJson() => prune(<String, dynamic>{
+        'hydration_target_ml': millilitres,
+        'hydration_target_sourced_ml': sourcedMillilitres,
+        'hydration_target_chosen_by_user': chosenByUser,
+        'hydration_target_source': source,
+        'hydration_target_caution': caution,
+      });
+}
+
 /// `meal_plans` - a day of eating and the reason it looks the way it does.
 class MealPlan {
   const MealPlan({
@@ -80,6 +145,8 @@ class MealPlan {
     this.generatedAt,
     this.items = const <MealPlanItem>[],
     this.hydrationTargetMl = 2500,
+    this.hydrationLoggedMl = 0,
+    this.hydrationGoal = const HydrationGoal(),
     this.dayNutrients = const <String, double>{},
     this.targets = const <String, double>{},
   });
@@ -94,7 +161,19 @@ class MealPlan {
   final String status;
   final DateTime? generatedAt;
   final List<MealPlanItem> items;
+
+  /// What the plan **asked** this person to drink, from the day plan's own
+  /// `hydration_ml`. It is not the goal and it is not what anybody drank; those
+  /// are [hydrationGoal] and [hydrationLoggedMl].
   final double hydrationTargetMl;
+
+  /// Millilitres of water actually logged for this day, summed by the server
+  /// from the drinks `POST /v1/feedback/hydration` recorded. Zero means nothing
+  /// was logged, which is not the same as nothing drunk.
+  final double hydrationLoggedMl;
+
+  /// The daily water goal in force, or an explained absence of one.
+  final HydrationGoal hydrationGoal;
 
   /// Day totals, recomputed server-side.
   final Map<String, double> dayNutrients;
@@ -115,6 +194,13 @@ class MealPlan {
         items: asMapList(json['items']).map(MealPlanItem.fromJson).toList(),
         hydrationTargetMl:
             asDouble(json['hydration_target_ml'], fallback: 2500),
+        hydrationLoggedMl: asDouble(json['hydration_logged_ml']),
+        // Nested, unlike everything else here, because this class's own JSON is
+        // the offline cache's dialect rather than the API's: `MealPlan` already
+        // spends `hydration_target_ml` on the plan's asked-for figure, and the
+        // goal uses that same key on the wire. One key, two meanings, is how a
+        // plan's suggestion ends up drawn as somebody's goal.
+        hydrationGoal: HydrationGoal.fromJson(asMap(json['hydration_goal'])),
         dayNutrients: asDoubleMap(json['day_nutrients']),
         targets: asDoubleMap(json['targets']),
       );
@@ -127,6 +213,8 @@ class MealPlan {
         'generated_at': timestampToJson(generatedAt),
         'items': items.map((MealPlanItem i) => i.toJson()).toList(),
         'hydration_target_ml': hydrationTargetMl,
+        'hydration_logged_ml': hydrationLoggedMl,
+        'hydration_goal': hydrationGoal.toJson(),
         'day_nutrients': dayNutrients,
         'targets': targets,
       });

@@ -15,18 +15,21 @@ one warm sentence about facts it was handed, never to work out what the facts ar
 * meals **logged** -- ``food_logs``;
 * **movement** logged -- the ``movement_logged`` rows in the same trail, folded with the
   same moderate-equivalent arithmetic the Today bar uses;
+* **water** logged -- the ``hydration_logged`` rows ``POST /v1/feedback/hydration``
+  writes into that same trail, summed as millilitres;
 * **what the last report said** -- the date it was read and how many of its values sat
   outside our own reference ranges, which is a count of rows, not an interpretation.
 
-**What a week deliberately does not contain.**
-
-*Hydration.* There is no server-side record of a glass of water. ``logHydration`` in the
-Flutter repository writes to the phone's own offline cache and no endpoint receives it
-(``app/lib/data/repository/http_health_repository.dart``), and the only hydration figure
-the backend holds is what a *plan asked for*, which is not what anybody drank. Reporting
-the plan's figure as "you drank" would be a fabrication, so the summary says plainly that
-hydration is not counted rather than counting the wrong thing. :data:`NOT_MEASURED`
-carries that sentence to the screen.
+**On hydration, which this summary used to refuse outright.** It refused for a good
+reason: until ``POST /v1/feedback/hydration`` existed, ``logHydration`` in the Flutter
+repository wrote to the phone's own cache and no endpoint received it, so the only
+hydration figure the backend held was what a *plan asked for* -- and printing that as
+"you drank" would have been a fabrication. Now there is a record of a drink, and a week
+that has one is counted like any other. A week that has **none** is still not reported as
+zero: :func:`not_measured_for` says there is no record rather than claiming the person
+drank nothing, which is the only honest thing to say about every week before this
+shipped. That distinction is the whole point -- an absence and a zero look identical on a
+bar and mean opposite things.
 
 *Trends and causes.* Nothing here compares one week with another and nothing here
 attributes anything to anything. A count is a fact. "Up from last week" is a trend, and a
@@ -54,14 +57,26 @@ MOVEMENT_EVENT = "movement_logged"
 #: Likewise for the row ``POST /v1/feedback/plan-items/{id}`` writes.
 PLAN_ITEM_EVENT = "plan_item_progress"
 
-#: Sentences about what this summary cannot say, and why. Deterministic copy, shown to
-#: the reader beside the counts so that an absence is never mistaken for a zero.
-NOT_MEASURED: tuple[str, ...] = (
-    "Water is not counted here. Your glasses are tallied on this phone only -- nothing "
-    "sends them to us, so we would be guessing.",
-    "Nothing here is compared with another week. We count what you logged, and we leave "
-    "the reading of it to you and your doctor.",
+#: And for one drink of water. Matched against ``app.api.feedback.HYDRATION_EVENT`` by
+#: ``tests/rules/test_weekly_rollup.py``, exactly as the movement one is.
+HYDRATION_EVENT = "hydration_logged"
+
+#: Said when a week holds no record of a drink at all -- which is every week before water
+#: logging existed, and any week since where nobody tapped. Deliberately "we have no
+#: record" and never "you drank nothing": those are opposite claims and only one of them
+#: is something we know.
+NO_WATER_RECORDED = (
+    "Water is not counted for this week -- we have no record of any. That is what a week "
+    "before water logging reached the app looks like, and it is also what a week nobody "
+    "tapped looks like, so we say nothing about it rather than show you a zero."
 )
+
+#: Said always. Comparing weeks is the other thing this summary will not do.
+NOT_COMPARED = (
+    "Nothing here is compared with another week. We count what you logged, and we leave "
+    "the reading of it to you and your doctor."
+)
+
 
 #: Below this a week has too little in it to say anything encouraging that is also true.
 #: Two separate logged things on two separate days: one tap on one day is a person trying
@@ -140,6 +155,12 @@ class WeekFacts:
     movement_target_minutes_per_week: int | None = None
     movement_target_source: str = ""
 
+    #: Millilitres of water logged across the week, and the days at least one drink
+    #: landed on. Zero and zero mean *no record*, never "drank nothing" -- see
+    #: :func:`not_measured_for`, which is what says so on screen.
+    hydration_ml: int = 0
+    days_hydrated: int = 0
+
     #: Days with at least one logged thing of any kind. The union of the three day sets
     #: rather than the largest of them: a week with a meal on Monday and a walk on
     #: Thursday is two active days, and a maximum would call it one.
@@ -157,7 +178,13 @@ class WeekFacts:
     def signals(self) -> int:
         """Logged things, of any kind. Planning is not logging: a plan is generated for
         you, so counting it would let a week the person never opened look busy."""
-        return self.marked_eaten + self.marked_skipped + self.meals_logged + self.days_moved
+        return (
+            self.marked_eaten
+            + self.marked_skipped
+            + self.meals_logged
+            + self.days_moved
+            + self.days_hydrated
+        )
 
     @property
     def active_days(self) -> int:
@@ -186,6 +213,7 @@ def roll_up(
     movement_events: Sequence[Mapping[str, Any]] = (),
     movement_target_minutes_per_week: int | None = None,
     movement_target_source: str = "",
+    hydration_events: Sequence[Mapping[str, Any]] = (),
     report: ReportNote | None = None,
 ) -> WeekFacts:
     """Fold already-fetched rows into one week of counts. Pure: no I/O, no model.
@@ -197,6 +225,7 @@ def roll_up(
     eaten, skipped, mark_days = _fold_progress(window, progress_events)
     meals, meal_days = _fold_food_logs(window, food_log_rows)
     minutes, move_days = _fold_movement(window, movement_events)
+    millilitres, water_days = _fold_hydration(window, hydration_events)
     planned_days = len({day for day in plan_dates if window.contains(day)})
 
     facts = WeekFacts(
@@ -212,7 +241,9 @@ def roll_up(
         days_moved=len(move_days),
         movement_target_minutes_per_week=movement_target_minutes_per_week,
         movement_target_source=movement_target_source,
-        days_active=len(mark_days | meal_days | move_days),
+        hydration_ml=millilitres,
+        days_hydrated=len(water_days),
+        days_active=len(mark_days | meal_days | move_days | water_days),
         report=report,
     )
     return _with_numbers(facts)
@@ -230,6 +261,8 @@ def _with_numbers(facts: WeekFacts) -> WeekFacts:
         facts.days_with_a_meal_logged,
         facts.movement_minutes,
         facts.days_moved,
+        facts.hydration_ml,
+        facts.days_hydrated,
     }
     if facts.movement_target_minutes_per_week is not None:
         values.add(facts.movement_target_minutes_per_week)
@@ -248,6 +281,8 @@ def _with_numbers(facts: WeekFacts) -> WeekFacts:
         days_moved=facts.days_moved,
         movement_target_minutes_per_week=facts.movement_target_minutes_per_week,
         movement_target_source=facts.movement_target_source,
+        hydration_ml=facts.hydration_ml,
+        days_hydrated=facts.days_hydrated,
         days_active=facts.days_active,
         report=facts.report,
         numbers=frozenset(values),
@@ -338,6 +373,33 @@ def _fold_movement(
     return minutes, days
 
 
+def _fold_hydration(
+    window: WeekWindow, rows: Sequence[Mapping[str, Any]]
+) -> tuple[int, set[date]]:
+    """``hydration_logged`` rows -> (millilitres, the days at least one drink landed on).
+
+    Nothing is derived: the endpoint stores millilitres and this adds them up. A row that
+    will not parse is skipped rather than counted as zero, for the reason in
+    :func:`roll_up` -- a row we cannot read is not evidence that nobody drank.
+    """
+    millilitres = 0
+    days: set[date] = set()
+    for row in rows:
+        payload = row.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        try:
+            on = date.fromisoformat(str(payload.get("on")))
+            raw = int(payload.get("millilitres"))
+        except (TypeError, ValueError):
+            continue
+        if raw <= 0 or not window.contains(on):
+            continue
+        millilitres += raw
+        days.add(on)
+    return millilitres, days
+
+
 def report_note(
     result_rows: Sequence[Mapping[str, Any]], *, measured_on: date | None = None
 ) -> ReportNote:
@@ -423,6 +485,14 @@ def factual_lines(facts: WeekFacts) -> list[str]:
         if target:
             line += f", against a weekly goal of {target} minutes"
         lines.append(line + ".")
+    if facts.days_hydrated:
+        # No goal on this line. The water goal is a *daily* figure and this total is a
+        # week's, so printing them side by side would invite the wrong arithmetic, and
+        # multiplying the goal by seven would be a number nobody computed.
+        lines.append(
+            f"You logged {_plural(facts.hydration_ml, 'millilitre', 'millilitres')} of "
+            f"water on {_plural(facts.days_hydrated, 'day', 'days')}."
+        )
     note = facts.report
     if note is not None and note.values:
         when = f" from {note.measured_on.isoformat()}" if note.measured_on else ""
@@ -453,6 +523,8 @@ def quiet_week_lines(facts: WeekFacts) -> list[str]:
         missing.append("no meal was logged")
     if not facts.days_moved:
         missing.append("no movement was logged")
+    if not facts.days_hydrated:
+        missing.append("no water was logged")
 
     lines = [
         "We do not have enough from this week to tell you anything true about it.",
@@ -472,6 +544,20 @@ def quiet_week_lines(facts: WeekFacts) -> list[str]:
     return lines
 
 
+def not_measured_for(facts: WeekFacts) -> tuple[str, ...]:
+    """Sentences about what this summary cannot say for **this** week, and why.
+
+    Deterministic copy, shown to the reader beside the counts so that an absence is never
+    mistaken for a zero. The water sentence is dropped as soon as there is water to count:
+    a week with drinks in it gets a line in :func:`factual_lines` instead, and telling
+    somebody we do not count something we have just counted would be the same kind of lie
+    in the other direction.
+    """
+    if facts.days_hydrated:
+        return (NOT_COMPARED,)
+    return (NO_WATER_RECORDED, NOT_COMPARED)
+
+
 def _plural(count: int, singular: str, plural: str) -> str:
     return f"{count} {singular if count == 1 else plural}"
 
@@ -481,16 +567,19 @@ def _sentence_case(text: str) -> str:
 
 
 __all__ = [
+    "HYDRATION_EVENT",
     "MIN_ACTIVE_DAYS_FOR_PROSE",
     "MIN_SIGNALS_FOR_PROSE",
     "MOVEMENT_EVENT",
-    "NOT_MEASURED",
+    "NOT_COMPARED",
+    "NO_WATER_RECORDED",
     "PLAN_ITEM_EVENT",
     "ReportNote",
     "WeekFacts",
     "WeekWindow",
     "factual_lines",
     "last_complete_week",
+    "not_measured_for",
     "quiet_week_lines",
     "report_note",
     "roll_up",
