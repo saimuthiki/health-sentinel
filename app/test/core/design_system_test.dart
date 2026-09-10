@@ -113,21 +113,54 @@ void main() {
   group('HpDisclaimer', () {
     testWidgets('states plainly that this is not a doctor', (WidgetTester tester) async {
       await pumpOnce(tester, wrapForTest(const HpDisclaimer()));
+      expect(find.text(HpDisclaimer.compactText), findsOneWidget);
       expect(find.textContaining('not a doctor'), findsOneWidget);
+    });
+
+    testWidgets('the elaboration is one tap away, and says what it must',
+        (WidgetTester tester) async {
+      await pumpOnce(tester, wrapForTest(const HpDisclaimer()));
+      expect(find.textContaining('never recommends a medicine'), findsNothing);
+
+      await tester.tap(find.text(HpDisclaimer.expandLabel));
+      await tester.pumpAndSettle();
+
       expect(find.textContaining('never recommends a medicine'), findsOneWidget);
+      expect(find.textContaining('does not diagnose'), findsOneWidget);
+    });
+
+    testWidgets('closing the detail never closes the notice',
+        (WidgetTester tester) async {
+      await pumpOnce(tester, wrapForTest(const HpDisclaimer()));
+
+      // Open, then close again, and check the permanent line at every step.
+      // Collapsing the detail is the only thing the control can do; there is no
+      // state in which the sentence itself is off the screen.
+      expect(find.text(HpDisclaimer.compactText), findsOneWidget);
+      await tester.tap(find.text(HpDisclaimer.expandLabel));
+      await tester.pumpAndSettle();
+      expect(find.text(HpDisclaimer.compactText), findsOneWidget);
+      await tester.tap(find.text(HpDisclaimer.collapseLabel));
+      await tester.pumpAndSettle();
+      expect(find.text(HpDisclaimer.compactText), findsOneWidget);
+      expect(find.byType(HpDisclaimer), findsOneWidget);
     });
 
     testWidgets('offers no way to dismiss it', (WidgetTester tester) async {
       await pumpOnce(tester, wrapForTest(const HpDisclaimer()));
-      expect(find.byType(IconButton), findsNothing);
+      // A close button or a swipe would remove it. A disclosure control does
+      // not, which is why InkWell is no longer part of this assertion.
       expect(find.byType(Dismissible), findsNothing);
-      expect(find.byType(InkWell), findsNothing);
+      expect(find.byType(CloseButton), findsNothing);
+      expect(find.byType(IconButton), findsNothing);
     });
 
     testWidgets('the compact form is still non-dismissible', (WidgetTester tester) async {
       await pumpOnce(tester, wrapForTest(const HpDisclaimer.compact()));
-      expect(find.byType(IconButton), findsNothing);
+      expect(find.text(HpDisclaimer.compactText), findsOneWidget);
       expect(find.byType(Dismissible), findsNothing);
+      expect(find.byType(CloseButton), findsNothing);
+      expect(find.byType(IconButton), findsNothing);
     });
   });
 
