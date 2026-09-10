@@ -47,6 +47,20 @@ abstract class HealthRepository {
 
   Future<MealPlan> loadPlan(DateTime date);
 
+  /// Record that one item of a plan was eaten, or was not.
+  ///
+  /// `POST /v1/feedback/plan-items/{item_id}` is the observed half of the
+  /// learning loop: what the plan suggested and what actually happened are kept
+  /// as two separate facts, so this writes to an append-only trail rather than
+  /// changing the plan. [done] false is the honest opposite of "I ate this" —
+  /// the backend records it as `skipped` — and it is what an undo, or a change
+  /// of mind about which option in a meal was eaten, has to send.
+  Future<void> markPlanItem({
+    required String planId,
+    required String itemId,
+    required bool done,
+  });
+
   Future<List<Goal>> loadGoals();
 
   Future<List<BiomarkerTrend>> loadTrends();

@@ -33,6 +33,13 @@ class FakeHealthRepository implements HealthRepository {
   HealthProfile? _profile;
   double _hydrationMl = 900;
 
+  /// What has been marked eaten or skipped, newest write wins.
+  ///
+  /// Keyed by plan item id. The real backend keeps an append-only trail; the
+  /// fake keeps only the latest state, which is all a screen ever asks it for
+  /// and is enough for a widget test to prove the right call was made.
+  final Map<String, bool> markedPlanItems = <String, bool>{};
+
   final List<ChatMessage> _messages = <ChatMessage>[
     ChatMessage(
       id: 'm1',
@@ -215,6 +222,16 @@ class FakeHealthRepository implements HealthRepository {
         },
       ),
     );
+  }
+
+  @override
+  Future<void> markPlanItem({
+    required String planId,
+    required String itemId,
+    required bool done,
+  }) async {
+    markedPlanItems[itemId] = done;
+    await _settle<void>(null);
   }
 
   @override

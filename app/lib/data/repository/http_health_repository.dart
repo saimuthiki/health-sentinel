@@ -452,6 +452,33 @@ class HttpHealthRepository implements HealthRepository, CacheAware {
     }
   }
 
+  /// Mark one item of a plan done or skipped.
+  ///
+  /// The body carries exactly the two fields `PlanItemProgressIn` allows —
+  /// `plan_id` and `state` — because that model is declared `extra="forbid"`,
+  /// so an extra field is a 422 rather than something quietly ignored. The
+  /// reply is a receipt for what was written and holds nothing a screen needs,
+  /// so nothing is returned: the interface asked a question and got an answer,
+  /// and that is the whole contract.
+  @override
+  Future<void> markPlanItem({
+    required String planId,
+    required String itemId,
+    required bool done,
+  }) async {
+    try {
+      await _api.postMap(
+        '/v1/feedback/plan-items/${Uri.encodeComponent(itemId)}',
+        body: <String, dynamic>{
+          'plan_id': planId,
+          'state': done ? 'done' : 'skipped',
+        },
+      );
+    } on ApiFailure catch (failure) {
+      throw _wrap(failure);
+    }
+  }
+
   /// No endpoint yet. An empty list is the truthful answer; a plausible one
   /// made up on the client is not.
   @override
