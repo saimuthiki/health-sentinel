@@ -21,6 +21,7 @@ import '../../features/setup/not_configured_screen.dart';
 import '../../features/shell/home_shell.dart';
 import '../../features/splash/splash_screen.dart';
 import '../../features/summary/weekly_summary_screen.dart';
+import '../../features/tastes/tastes_screen.dart';
 import '../../features/today/today_screen.dart';
 
 /// The app's routes.
@@ -178,6 +179,11 @@ GoRouter buildAppRouter() {
                     path: 'profile',
                     builder: (BuildContext context, GoRouterState state) =>
                         const ProfileSummaryScreen(),
+                  ),
+                  GoRoute(
+                    path: 'tastes',
+                    builder: (BuildContext context, GoRouterState state) =>
+                        const TastesScreen(),
                   ),
                   GoRoute(
                     path: 'reminders',

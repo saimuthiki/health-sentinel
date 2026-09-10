@@ -10,6 +10,7 @@ import '../../data/models/models.dart';
 import '../../data/providers.dart';
 import '../../data/repository/health_repository.dart';
 import '../common/failure_copy.dart';
+import '../tastes/taste_choice.dart';
 
 /// Today's plan, meal by meal, with the reason each thing is there.
 ///
@@ -444,15 +445,19 @@ class _SlotSectionState extends ConsumerState<_SlotSection> {
             'again in a moment.',
       );
     } finally {
+      // The two maps are written here rather than inside the `setState`
+      // closure: a local is only promoted to non-null in the enclosing body,
+      // and `_tastes` holds a non-nullable stance. `setState` then does what it
+      // is for, which is to say the frame is stale.
       if (mounted) {
+        if (landed != null && note != null) {
+          _tastes[item.id] = landed;
+          _tasteNotes[item.id] = note;
+        }
         setState(() {
           _busyItemId = null;
           _busyStance = null;
           _error = failure;
-          if (landed != null && note != null) {
-            _tastes[item.id] = landed;
-            _tasteNotes[item.id] = note;
-          }
         });
       }
     }
@@ -673,7 +678,7 @@ class _MealOption extends StatelessWidget {
             const SizedBox(height: HpSpacing.md),
             _TasteQuestion(
               itemId: item.id,
-              chosen: taste,
+              answer: taste,
               note: tasteNote,
               busyStance: busyStance,
               onTaste: onTaste,
@@ -713,14 +718,18 @@ class _MealOption extends StatelessWidget {
 class _TasteQuestion extends StatelessWidget {
   const _TasteQuestion({
     required this.itemId,
-    required this.chosen,
+    required this.answer,
     required this.note,
     required this.busyStance,
     required this.onTaste,
   });
 
   final String itemId;
-  final TasteStance? chosen;
+
+  /// The answer that landed, or null while none has.
+  final TasteStance? answer;
+
+  /// What that answer did, in one sentence. Comes from the reply.
   final String? note;
   final TasteStance? busyStance;
   final void Function(TasteStance stance)? onTaste;
@@ -739,23 +748,11 @@ class _TasteQuestion extends StatelessWidget {
           style: HpType.label.copyWith(color: p.inkMuted),
         ),
         const SizedBox(height: HpSpacing.sm),
-        // Wrap, not Row: "Did not like it" beside two others does not fit on a
-        // narrow phone, and three answers squeezed onto one line is how a
-        // person taps the wrong one.
-        Wrap(
-          spacing: HpSpacing.sm,
-          runSpacing: HpSpacing.sm,
-          children: <Widget>[
-            for (final TasteStance stance in TasteStance.values)
-              _TasteChip(
-                key: ValueKey<String>('taste-$itemId-${stance.name}'),
-                stance: stance,
-                selected: chosen == stance,
-                busy: busyStance == stance,
-                onPressed:
-                    onTaste == null ? null : () => onTaste!(stance),
-              ),
-          ],
+        TasteChoiceRow(
+          keyPrefix: itemId,
+          selected: answer,
+          busyStance: busyStance,
+          onTaste: onTaste,
         ),
         if (sentence != null) ...<Widget>[
           const SizedBox(height: HpSpacing.sm),
@@ -770,81 +767,6 @@ class _TasteQuestion extends StatelessWidget {
           ),
         ],
       ],
-    );
-  }
-}
-
-/// One answer. Filled when it is the one that landed, outlined otherwise.
-///
-/// The selected state is carried by fill *and* by a tick, not by colour alone:
-/// the same reason the chosen option above uses a filled circle rather than a
-/// green tint. It is 48dp tall, which is the minimum target this app promises.
-class _TasteChip extends StatelessWidget {
-  const _TasteChip({
-    super.key,
-    required this.stance,
-    required this.selected,
-    required this.busy,
-    required this.onPressed,
-  });
-
-  final TasteStance stance;
-  final bool selected;
-  final bool busy;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final HpPalette p = context.hp;
-    final Color background = selected ? p.pineSoft : p.surface;
-    final Color edge = selected ? p.pine : p.hairline;
-    final Color label = selected ? p.pineDeep : p.ink;
-
-    return Semantics(
-      button: true,
-      selected: selected,
-      child: Material(
-        color: background,
-        borderRadius: HpRadii.pillRadius,
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: busy ? null : onPressed,
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 48),
-            padding: const EdgeInsets.symmetric(
-              horizontal: HpSpacing.lg,
-              vertical: HpSpacing.sm,
-            ),
-            decoration: BoxDecoration(
-              borderRadius: HpRadii.pillRadius,
-              border: Border.all(color: edge),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                if (busy) ...<Widget>[
-                  SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(p.pineDeep),
-                    ),
-                  ),
-                  const SizedBox(width: HpSpacing.sm),
-                ] else if (selected) ...<Widget>[
-                  Icon(Icons.check_rounded, size: 16, color: p.pineDeep),
-                  const SizedBox(width: HpSpacing.sm),
-                ],
-                Text(
-                  stance.label,
-                  style: HpType.label.copyWith(color: label),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

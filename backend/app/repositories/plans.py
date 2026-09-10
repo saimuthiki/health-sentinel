@@ -185,25 +185,16 @@ class FoodLogRepository(UserScopedRepository):
         rows = await self.db.upsert("food_feedback", row, on_conflict="food_log_id")
         return rows[0] if rows else row
 
-    async def preference(self, food_id: str) -> FoodPreference | None:
-        """One stored preference, with the food's real name resolved.
+    async def food_name(self, food_id: str) -> str | None:
+        """One food's display name, or ``None`` when we hold no such food.
 
-        Kept next to :meth:`preferences` so both read the same columns and resolve the
-        name the same way. Returns ``None`` when nothing is stored for that food, and
-        also when the food itself is not in the reference table -- a preference nobody
-        can put a name to is one the user could never recognise or correct.
+        Used to check a food exists *before* writing a preference for it.
+        ``food_preferences.food_id`` is a foreign key into ``foods``, so writing first
+        and asking afterwards would turn "we do not have that food" into a foreign-key
+        violation from Postgres -- an error nobody can act on, in place of a sentence
+        that says what is wrong.
         """
-        row = await self.db.select_one(
-            "food_preferences",
-            columns="food_id,stance,score",
-            filters={**self._mine, "food_id": eq(food_id)},
-        )
-        if row is None:
-            return None
-        names = await self._food_names([food_id])
-        if food_id not in names:
-            return None
-        return self._preference_of(row, names)
+        return (await self._food_names([food_id])).get(food_id)
 
     async def preferences(self) -> list[FoodPreference]:
         rows = await self.db.select(

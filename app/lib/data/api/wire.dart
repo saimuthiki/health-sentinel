@@ -500,15 +500,16 @@ class Wire {
     String source = 'manual',
   }) {
     final String? slot = mealSlot == null ? null : mealSlotOut(mealSlot);
-    final String? text = freeText == null ? null : _nonEmpty(freeText);
+    String? text = freeText == null ? null : _nonEmpty(freeText);
+    // `free_text` is capped at 280 characters server-side. A plan item title is
+    // nowhere near that, but trimming here is cheaper than a 422 there.
+    if (text != null && text.length > 280) {
+      text = text.substring(0, 280);
+    }
     return prune(<String, dynamic>{
       'meal_slot': slot,
       'food_id': foodId,
-      // `free_text` is capped at 280 characters server-side. A plan item title
-      // is nowhere near that, but a trim here is cheaper than a 422 there.
-      'free_text': text == null || text.length <= 280
-          ? text
-          : text.substring(0, 280),
+      'free_text': text,
       'source': source,
     });
   }

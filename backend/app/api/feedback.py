@@ -253,25 +253,24 @@ async def set_food_preference(
     genuinely "forget I said anything", reached by the same three buttons as everything
     else rather than by a fourth control that behaves differently.
     """
+    # Checked before anything is written. ``food_preferences.food_id`` is a foreign key
+    # into ``foods``, so an id we do not hold would come back from Postgres as a 23503
+    # rather than as a sentence -- and the tastes list would be the place it showed up.
+    name = await logs.food_name(food_id)
+    if name is None:
+        raise NotFound("We do not have that food in our list, so there is nothing to change.")
+
     score = RATING_TO_SCORE[payload.rating]
     stance = stance_for(score)
     await logs.set_preference(food_id, stance, score)
-
-    stored = await logs.preference(food_id)
-    if stored is None:
-        # The write went in under RLS as this user, so a read that comes back with
-        # nothing means the id is not a food we hold -- not that the write failed. Saying
-        # "we do not have that food" is the truthful answer, and it stops the tastes list
-        # filling with rows nobody can put a name to.
-        raise NotFound("We do not have that food in our list, so there is nothing to change.")
-
     await audit.event(
         "food_preference_set",
         {"food_id": food_id, "rating": payload.rating, "stance": stance.value},
     )
-    return PreferenceOut(
-        food_id=stored.food_id, name=stored.name, stance=stored.stance, score=stored.score
-    )
+    # Built from what was just written rather than read back: these are the values the
+    # upsert carried, and a second round trip could only disagree with them by racing
+    # another write of the same row.
+    return PreferenceOut(food_id=food_id, name=name, stance=stance, score=score)
 
 
 @router.post(

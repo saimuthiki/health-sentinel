@@ -262,8 +262,14 @@ def test_neutral_is_how_a_belief_is_forgotten(client, auth, store):
     assert [item.id for item in chosen] == [food_id], "neutral should be invisible"
 
 
-def test_a_food_we_do_not_have_is_refused_rather_than_stored(client, auth, store):
-    """Otherwise the tastes list fills with rows nobody can put a name to."""
+def test_a_food_we_do_not_have_is_refused_before_anything_is_written(client, auth, store):
+    """404 with a sentence, and nothing written -- in that order.
+
+    The check has to come *before* the upsert. ``food_preferences.food_id`` is a foreign
+    key into ``foods``, so writing first would turn "we do not have that food" into a
+    23503 from Postgres: an error nobody can act on, in place of a sentence that says
+    what is wrong. The row count below is what pins the ordering.
+    """
     response = request(
         client,
         "PUT",
@@ -273,6 +279,7 @@ def test_a_food_we_do_not_have_is_refused_rather_than_stored(client, auth, store
     )
     assert response.status_code == 404
     assert "food" in problem(response)["detail"].lower()
+    assert store.rows("food_preferences") == []
 
 
 def test_a_rating_outside_one_to_five_is_refused_on_the_preference_route(client, auth, store):

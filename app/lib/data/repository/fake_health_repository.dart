@@ -411,9 +411,10 @@ class FakeHealthRepository implements HealthRepository {
       for (final MapEntry<String, TasteStance> entry in foodPreferences.entries)
         FoodPreference(
           foodId: entry.key,
-          // A belief nobody can name is one nobody can correct, so an id with
-          // no name behind it is left out rather than shown as itself. The
-          // backend does the same.
+          // Falls back to the id, which is what the backend's `preferences()`
+          // does. It should never be reached — `food_preferences.food_id` is a
+          // foreign key into `foods` — and showing the id is still better than
+          // showing a blank row nobody can identify.
           name: _foodNames[entry.key] ?? entry.key,
           stance: entry.value,
           score: entry.value.rating.toDouble(),

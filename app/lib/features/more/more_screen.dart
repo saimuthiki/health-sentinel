@@ -84,6 +84,13 @@ class MoreScreen extends ConsumerWidget {
               onTap: () => context.go(profileReviewPath),
             ),
             _MoreTile(
+              icon: Icons.restaurant_menu_rounded,
+              title: 'Food you like',
+              subtitle: 'What we have learned from your ratings, and how to '
+                  'change it',
+              onTap: () => context.go('/more/tastes'),
+            ),
+            _MoreTile(
               icon: Icons.notifications_none_rounded,
               title: 'Reminders',
               subtitle: 'Water, meals, movement, sleep and quiet hours',
