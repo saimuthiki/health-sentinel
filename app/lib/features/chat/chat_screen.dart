@@ -177,7 +177,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         // Guarded by `mounted` because `ref` belongs to a widget: somebody who
         // sends a message and immediately leaves the tab must not be met with a
         // crash for a message that went perfectly well.
-        await ref.refresh(messagesProvider.future);
+        //
+        // Held in a variable and awaited on the next line rather than awaited
+        // in one go: `refresh` is annotated so that its result cannot be
+        // dropped, and an `await` on its own does not count as having used it.
+        // The analyzer is right to insist - a refresh fired and forgotten is
+        // exactly the bug this line exists to avoid.
+        final Future<List<ChatMessage>> reloaded =
+            ref.refresh(messagesProvider.future);
+        await reloaded;
       }
     } catch (error) {
       if (!sent) {
