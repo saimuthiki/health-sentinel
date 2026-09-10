@@ -90,7 +90,11 @@ EXPORT_TABLES: tuple[tuple[str, str], ...] = (
     ("grocery_lists", "*"),
     ("alerts", "alert_type,title,body,schedule_rule,enabled,quiet_hours"),
     ("chat_threads", "id,title,created_at"),
-    ("chat_messages", "thread_id,role,content,created_at"),
+    # ``attachments`` is in the list because a chat photo has no table of its own: the
+    # jsonb on the message is the only record that the file exists at all. Leaving it out
+    # would mean an export that quietly omits something we are holding, which is the same
+    # broken promise as a deletion that misses a file.
+    ("chat_messages", "thread_id,role,content,attachments,created_at"),
     ("weekly_summaries", "week_start,metrics,narrative,created_at"),
     ("deletion_requests", "requested_at,completed_at,objects_deleted,rows_deleted"),
 )

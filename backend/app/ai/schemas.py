@@ -248,6 +248,52 @@ CHAT_REPLY_SCHEMA: dict[str, Any] = {
     "propertyOrdering": ["reply", "follow_up_questions", "needs_more_info"],
 }
 
+CHAT_PHOTO_REPLY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": (
+        "One coaching reply about a photograph the user says is food or drink. "
+        "The only extra field is a way to say the picture is not food -- there is "
+        "deliberately no field for describing anything else the picture might show."
+    ),
+    "properties": {
+        "photo_shows_food": {
+            "type": "boolean",
+            "description": (
+                "True only if the attached picture is food, drink, a food package or a "
+                "menu. False for anything else -- skin, a body part, a rash, a wound, a "
+                "person, a document, a screen. When false, leave reply empty and write "
+                "nothing about what the picture does show: the app replaces the answer "
+                "with its own wording."
+            ),
+        },
+        "reply": _string(
+            "The reply to the user, in plain English, about the food in the picture and "
+            "what they wrote. No medication name, no dose, no diagnosis. Empty when "
+            "photo_shows_food is false."
+        ),
+        "follow_up_questions": {
+            "type": "array",
+            "description": (
+                "Clarifying questions to ask BEFORE advising when the user reports a "
+                "symptom: onset, sudden or gradual, recent illness, stress, associated "
+                "symptoms. Empty when nothing needs clarifying."
+            ),
+            "items": {"type": "string"},
+        },
+        "needs_more_info": {
+            "type": "boolean",
+            "description": "True when the reply is asking questions rather than advising.",
+        },
+    },
+    "required": ["photo_shows_food", "reply", "follow_up_questions", "needs_more_info"],
+    "propertyOrdering": [
+        "photo_shows_food",
+        "reply",
+        "follow_up_questions",
+        "needs_more_info",
+    ],
+}
+
 MEMORY_FACT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "description": "One atomic, durable fact about the user, taken from what they said.",
@@ -325,6 +371,7 @@ ALL_SCHEMAS: dict[str, dict[str, Any]] = {
     "day_plan": DAY_PLAN_SCHEMA,
     "week_plan": WEEK_PLAN_SCHEMA,
     "chat_reply": CHAT_REPLY_SCHEMA,
+    "chat_photo_reply": CHAT_PHOTO_REPLY_SCHEMA,
     "memory_extraction": MEMORY_EXTRACTION_SCHEMA,
     "safety_judge": SAFETY_JUDGE_SCHEMA,
 }

@@ -433,6 +433,11 @@ class Wire {
         id: asString(json['id']),
         role: ChatRole.fromWire(json['role']),
         content: asString(json['content']),
+        // Our own labels for anything attached - "Photo of a meal", "Report" -
+        // and never a filename. Without this a photo sent earlier came back
+        // from the server as a bare message, so leaving the tab and returning
+        // lost the fact that a picture had been part of the conversation.
+        attachments: asStringList(json['attachments']),
         createdAt: asTimestamp(json['created_at']),
       );
 

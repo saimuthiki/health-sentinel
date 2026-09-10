@@ -11,6 +11,8 @@ import '../../data/models/models.dart';
 import '../../data/providers.dart';
 import '../common/failure_copy.dart';
 import 'chat_attachment_sheet.dart';
+import 'chat_photo.dart';
+import 'chat_photo_sheet.dart';
 import 'chat_thinking_bubble.dart';
 
 /// Where symptoms, questions and "I had two idlis" go.
@@ -28,6 +30,14 @@ class ChatScreen extends ConsumerStatefulWidget {
 
 /// The Reports tab, as `core/router/app_router.dart` registers it.
 const String _reportsRoute = '/reports';
+
+/// The camera button's tooltip. Says both things it is for, because a person
+/// who has only been told "send a photo" will not guess that a rash is welcome.
+const String photoButtonTooltip = 'Send a photo of a meal, or of a skin concern';
+
+/// Shown while a picture is being stored. Kept here so the screen and its tests
+/// name one string rather than two copies that can drift apart.
+const String attachingPhotoLabel = 'Saving your photo';
 
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   final TextEditingController _input = TextEditingController();
@@ -62,6 +72,27 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   /// Held as whole reports rather than as ids so the chips above the input can
   /// name them; only the ids are sent.
   final List<HealthReport> _attachments = <HealthReport>[];
+
+  /// The photograph waiting to go with the next message, or null.
+  ///
+  /// One at a time. A conversation is a sequence of things somebody said, and
+  /// "here are four pictures and one sentence" is not one of them; the backend
+  /// accepts three, and if that ever needs using this becomes a list.
+  ///
+  /// It is already uploaded by the time it is held here - see [_addPhoto] - so
+  /// what this carries is the bytes to draw on screen plus the id to send.
+  PickedChatPhoto? _photo;
+
+  /// True while a photo is being stored, which is a different kind of busy from
+  /// [_sending] and has to be told apart from it: the send button is closed for
+  /// both, but only one of them puts a message in the conversation.
+  bool _attaching = false;
+
+  /// What the backend said about the photo - that a skin picture is kept and not
+  /// interpreted, or that a picture sent as a meal turned out not to be food.
+  ///
+  /// Its words, not ours and never the AI's. See `backend/app/rules/chat_photos.py`.
+  List<String> _photoNotes = const <String>[];
 
   @override
   void dispose() {
@@ -131,6 +162,109 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   String _attachmentLabel(HealthReport report) =>
       report.labName ?? report.fileName;
 
+  /// Attach a photograph: ask what it is, pick it, check it, store it.
+  ///
+  /// The order matters. The question comes first, before the camera opens,
+  /// because the answer decides what the backend is allowed to do with the
+  /// picture and the person is the only one who reliably knows it - see
+  /// `chat_photo_sheet.dart`. The bytes are checked here, on the phone, so a
+  /// picture that was never going to be accepted is refused now rather than
+  /// after a long upload. And the storing happens now rather than on send, so
+  /// that the sentence about a skin photo not being interpreted is on screen
+  /// *before* anybody waits for a reply.
+  Future<void> _addPhoto() async {
+    if (_sending || _attaching) {
+      return;
+    }
+    final ChatPhotoService? service = ref.read(chatPhotoServiceProvider);
+    if (service == null) {
+      // A build with no backend address. Saying so beats opening a camera we
+      // have nowhere to send the result of.
+      setState(() => _sendError = photoNeedsBackendMessage);
+      return;
+    }
+
+    final ChatPhotoRequest? request = await showChatPhotoSheet(context);
+    if (!mounted || request == null) {
+      return;
+    }
+
+    PickedChatPhoto? picked;
+    try {
+      picked = await ref
+          .read(chatPhotoPickerProvider)
+          .pick(request.kind, request.source);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _sendError = explainFailure(
+            error,
+            fallback: 'That photo could not be opened. Please try again.',
+          );
+        });
+      }
+      return;
+    }
+    if (!mounted || picked == null) {
+      // Backing out of a camera is the commonest outcome and is not a failure.
+      return;
+    }
+    final PickedChatPhoto chosen = picked;
+
+    final String? refusal = describeChatPhotoRefusal(chosen.bytes);
+    if (refusal != null) {
+      setState(() => _sendError = refusal);
+      return;
+    }
+
+    setState(() {
+      _attaching = true;
+      _sendError = null;
+      _photoNotes = const <String>[];
+    });
+
+    String? failure;
+    ChatPhotoUpload? stored;
+    try {
+      stored = await service.upload(chosen);
+      chosen.uploadedId = stored.photoId;
+      chosen.uploadedLabel = stored.label;
+    } catch (error) {
+      failure = explainFailure(error, fallback: photoUploadFallbackMessage);
+    } finally {
+      if (mounted) {
+        final ChatPhotoUpload? result = stored;
+        setState(() {
+          _attaching = false;
+          _sendError = failure;
+          // Only a photo that actually reached the backend is held: one that
+          // did not has no id, and a chip for it above the composer would be
+          // an attachment that quietly goes nowhere when send is tapped.
+          _photo = result == null ? null : chosen;
+          _photoNotes = result?.notices ?? const <String>[];
+        });
+      }
+    }
+  }
+
+  /// Take the photo back off the message.
+  ///
+  /// The copy already stored on the server is left where it is. Removing it
+  /// would need a delete endpoint of its own, and the file is already inside
+  /// the promise that matters: it sits in this user's own folder, so
+  /// `POST /v1/privacy/delete` sweeps it with everything else.
+  void _removePhoto() {
+    setState(() {
+      _photo = null;
+      _photoNotes = const <String>[];
+    });
+  }
+
+  /// Stop showing what the backend said about a photo.
+  void _dismissPhotoNotes() {
+    setState(() => _photoNotes = const <String>[]);
+  }
+
   /// Send the message, and give it back if it did not go.
   ///
   /// The busy flag is cleared in a `finally`. Before this, a refused send left
@@ -139,22 +273,30 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   /// to get either back short of leaving the tab.
   Future<void> _send() async {
     final String text = _input.text.trim();
-    if (text.isEmpty || _sending) {
+    // `_attaching` joins the guard: a photo that is still going up has no id
+    // yet, so a send now would post the message without it.
+    if (text.isEmpty || _sending || _attaching) {
       return;
     }
     final List<String> attachmentIds =
         _attachments.map((HealthReport r) => r.id).toList();
+    final PickedChatPhoto? photo = _photo;
 
     setState(() {
       _sending = true;
       _sendError = null;
       // A local echo, marked pending, with an id no server would recognise and
-      // no timestamp: nothing about it pretends to be a stored message.
+      // no timestamp: nothing about it pretends to be a stored message. Its
+      // attachment labels are the words the backend will use when the same
+      // message comes back, so the bubble does not relabel itself on reload.
       _pending = ChatMessage(
         id: 'local-${DateTime.now().microsecondsSinceEpoch}',
         role: ChatRole.user,
         content: text,
-        attachments: attachmentIds,
+        attachments: <String>[
+          ...List<String>.filled(attachmentIds.length, reportChipLabel),
+          if (photo != null) photo.chipLabel,
+        ],
         pending: true,
       );
     });
@@ -162,11 +304,34 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _scrollToEnd();
 
     String? failure;
+    List<String>? notes;
     bool sent = false;
     try {
-      await ref
-          .read(healthRepositoryProvider)
-          .sendMessage(text, attachments: attachmentIds);
+      final String? photoId = photo?.uploadedId;
+      final ChatPhotoService? photos = ref.read(chatPhotoServiceProvider);
+      if (photo != null) {
+        // A message carrying a photo goes through the chat feature's own
+        // service, because the repository's `sendMessage` has no way to name a
+        // photo. See `chat_photo.dart`.
+        //
+        // Neither of these can be null in practice - a photo is only held here
+        // once it has been stored, which needed both - but they are checked
+        // rather than asserted, because a `!` that is wrong is a crash and a
+        // thrown ChatPhotoException is a sentence somebody can read.
+        if (photos == null || photoId == null) {
+          throw const ChatPhotoException(photoUploadFallbackMessage);
+        }
+        final ChatPhotoReply reply = await photos.send(
+          message: text,
+          photoIds: <String>[photoId],
+          reportIds: attachmentIds,
+        );
+        notes = reply.notes;
+      } else {
+        await ref
+            .read(healthRepositoryProvider)
+            .sendMessage(text, attachments: attachmentIds);
+      }
       sent = true;
       if (mounted) {
         // Refreshed and *awaited*, rather than invalidated and forgotten. The
@@ -202,6 +367,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       // be inviting somebody to send the same thing a second time.
     } finally {
       if (mounted) {
+        final List<String>? replyNotes = notes;
         setState(() {
           _sending = false;
           _sendError = failure;
@@ -212,6 +378,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           _pending = null;
           if (sent) {
             _attachments.clear();
+            // The photo has gone with the message, so it is no longer waiting
+            // to go with the next one.
+            _photo = null;
+          }
+          if (replyNotes != null) {
+            // What the backend says about the photo *after* reading the message
+            // replaces what it said when the photo was attached.
+            _photoNotes = replyNotes;
           }
         });
         _scrollToEnd();
@@ -222,8 +396,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       return;
     }
     // The words somebody just typed are theirs; losing them to a dropped
-    // connection is not acceptable. The reports they attached are kept for the
-    // same reason - the message is about to be sent again exactly as it was.
+    // connection is not acceptable. The reports and the photo they attached are
+    // kept for the same reason - the message is about to be sent again exactly
+    // as it was, and the photo is already stored, so trying again costs one
+    // small request rather than another upload.
     _input.text = text;
     _input.selection = TextSelection.collapsed(offset: text.length);
   }
@@ -234,6 +410,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final AsyncValue<List<ChatMessage>> messages =
         ref.watch(messagesProvider);
     final String? sendError = _sendError;
+    final PickedChatPhoto? waiting = _photo;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Chat')),
@@ -286,7 +463,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         return _Bubble(message: list[index]);
                       }
                       if (index == list.length && pending != null) {
-                        return _Bubble(message: pending);
+                        // The echo draws the actual picture, from the bytes
+                        // still in memory. A message reloaded from the server
+                        // shows the label instead: the file lives in private
+                        // storage and is not addressable from here.
+                        return _Bubble(message: pending, photo: _photo);
                       }
                       return const ChatThinkingBubble();
                     },
@@ -323,6 +504,52 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         child: Text(
                           sendError,
                           style: HpType.label.copyWith(color: p.urgentInk),
+                        ),
+                      ),
+                    ),
+                  ],
+                  if (_photoNotes.isNotEmpty) ...<Widget>[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        HpSpacing.sm,
+                        HpSpacing.sm,
+                        HpSpacing.sm,
+                        0,
+                      ),
+                      child: _PhotoNotes(
+                        notes: _photoNotes,
+                        onDismiss: _dismissPhotoNotes,
+                      ),
+                    ),
+                  ],
+                  // Hidden while the message is going: the picture is in the
+                  // bubble by then, and two of it on one screen reads as two
+                  // photographs rather than one.
+                  if (waiting != null && !_sending) ...<Widget>[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        HpSpacing.sm,
+                        HpSpacing.sm,
+                        HpSpacing.sm,
+                        0,
+                      ),
+                      child: _PhotoStrip(photo: waiting, onRemove: _removePhoto),
+                    ),
+                  ],
+                  if (_attaching) ...<Widget>[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        HpSpacing.sm,
+                        HpSpacing.sm,
+                        HpSpacing.sm,
+                        0,
+                      ),
+                      child: Semantics(
+                        liveRegion: true,
+                        container: true,
+                        child: Text(
+                          attachingPhotoLabel,
+                          style: HpType.label.copyWith(color: p.inkMuted),
                         ),
                       ),
                     ),
@@ -366,9 +593,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         icon: const Icon(Icons.attach_file_rounded),
                         // "A report", not "a report or a photo": what travels
                         // with a message is the id of something already
-                        // uploaded, and the sheet says so plainly.
+                        // uploaded, and the sheet says so plainly. The camera
+                        // beside it is the other thing, and has its own button
+                        // rather than a second row in this sheet, because a
+                        // photograph is a different act from picking a file.
                         tooltip: 'Attach a report',
-                        onPressed: _sending ? null : _openAttachments,
+                        onPressed: _sending || _attaching ? null : _openAttachments,
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.photo_camera_outlined),
+                        tooltip: photoButtonTooltip,
+                        // Closed while a photo is already going up, so two
+                        // pictures cannot race each other into one message.
+                        onPressed:
+                            _sending || _attaching || _photo != null ? null : _addPhoto,
                       ),
                       Expanded(
                         child: TextField(
@@ -394,7 +632,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       IconButton.filled(
                         icon: const Icon(Icons.send_rounded),
                         tooltip: 'Send',
-                        onPressed: _sending ? null : _send,
+                        onPressed: _sending || _attaching ? null : _send,
                       ),
                     ],
                   ),
@@ -409,15 +647,24 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 }
 
 class _Bubble extends StatelessWidget {
-  const _Bubble({required this.message});
+  const _Bubble({required this.message, this.photo});
 
   final ChatMessage message;
+
+  /// The picture this message is carrying, when the app still has the bytes.
+  ///
+  /// Only ever set on the local echo of a message being sent. Once the
+  /// conversation is reloaded the server describes the attachment in words -
+  /// "Photo of a meal" - because the file is in private storage and this screen
+  /// has no address for it.
+  final PickedChatPhoto? photo;
 
   @override
   Widget build(BuildContext context) {
     final HpPalette p = context.hp;
     final bool mine = message.role == ChatRole.user;
     final DateTime? at = message.createdAt;
+    final PickedChatPhoto? picture = photo;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: HpSpacing.lg),
@@ -442,9 +689,51 @@ class _Bubble extends StatelessWidget {
                   bottomRight: Radius.circular(mine ? 4 : HpRadii.card),
                 ),
               ),
-              child: Text(
-                message.content,
-                style: HpType.reading.copyWith(color: p.ink),
+              child: Column(
+                crossAxisAlignment: mine
+                    ? CrossAxisAlignment.end
+                    : CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  if (picture != null) ...<Widget>[
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(HpRadii.field),
+                      // Capped rather than drawn at full size: a bubble is a
+                      // bubble, and a portrait photograph at its own height
+                      // would push the words that went with it off the screen.
+                      // `contain` rather than `cover`, so a wide picture is
+                      // scaled down inside the bubble rather than spilling out
+                      // of the side of it.
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 180),
+                        child: Image.memory(
+                          picture.bytes,
+                          fit: BoxFit.contain,
+                          // A picture that will not decode must not take the
+                          // message down with it.
+                          errorBuilder: (BuildContext context, Object error,
+                                  StackTrace? stack) =>
+                              _AttachmentChip(label: picture.chipLabel),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: HpSpacing.sm),
+                  ] else if (message.attachments.isNotEmpty) ...<Widget>[
+                    Wrap(
+                      spacing: HpSpacing.xs,
+                      runSpacing: HpSpacing.xs,
+                      children: <Widget>[
+                        for (final String label in message.attachments)
+                          _AttachmentChip(label: label),
+                      ],
+                    ),
+                    const SizedBox(height: HpSpacing.sm),
+                  ],
+                  Text(
+                    message.content,
+                    style: HpType.reading.copyWith(color: p.ink),
+                  ),
+                ],
               ),
             ),
           ),
@@ -468,6 +757,161 @@ class _Bubble extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// The name of one thing travelling with a message, inside its bubble.
+///
+/// A label rather than the file: the picture itself is in private storage and
+/// the words are what the server sends back. Small and quiet on purpose - it is
+/// a note about the message, not the message.
+class _AttachmentChip extends StatelessWidget {
+  const _AttachmentChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final HpPalette p = context.hp;
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: HpSpacing.sm,
+        vertical: HpSpacing.xxs,
+      ),
+      decoration: BoxDecoration(
+        color: p.surface,
+        border: Border.all(color: p.hairline),
+        borderRadius: HpRadii.pillRadius,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(Icons.image_outlined, size: 13, color: p.inkFaint),
+          const SizedBox(width: HpSpacing.xs),
+          Text(label, style: HpType.micro.copyWith(color: p.inkMuted)),
+        ],
+      ),
+    );
+  }
+}
+
+/// The photograph waiting to go with the next message.
+///
+/// A thumbnail rather than a file name, because a person who has taken three
+/// pictures of the same arm this week cannot tell them apart by name, and
+/// sending the wrong one is a wasted trip through the whole loop.
+class _PhotoStrip extends StatelessWidget {
+  const _PhotoStrip({required this.photo, required this.onRemove});
+
+  final PickedChatPhoto photo;
+
+  /// Taking it back off the message. Always available while the strip is on
+  /// screen: the strip is hidden for the length of a send, so there is no window
+  /// in which somebody could unattach a photo that has already gone.
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final HpPalette p = context.hp;
+
+    return Row(
+      children: <Widget>[
+        ClipRRect(
+          borderRadius: BorderRadius.circular(HpRadii.field),
+          child: Image.memory(
+            photo.bytes,
+            width: 44,
+            height: 44,
+            fit: BoxFit.cover,
+            errorBuilder:
+                (BuildContext context, Object error, StackTrace? stack) =>
+                    Container(
+              width: 44,
+              height: 44,
+              color: p.surfaceSunk,
+              child: Icon(Icons.image_outlined, size: 18, color: p.inkFaint),
+            ),
+          ),
+        ),
+        const SizedBox(width: HpSpacing.md),
+        Expanded(
+          child: Text(
+            photo.chipLabel,
+            style: HpType.label.copyWith(color: p.ink),
+          ),
+        ),
+        IconButton(
+          icon: const Icon(Icons.close_rounded, size: 18),
+          tooltip: 'Remove the photo',
+          onPressed: onRemove,
+        ),
+      ],
+    );
+  }
+}
+
+/// What the backend said about a photograph.
+///
+/// Deliberately not a bubble in the conversation. These sentences are the app
+/// speaking about what it will and will not do - that a picture of skin is kept
+/// but not read - and dressing them as a reply would blur the one line this
+/// screen most needs to keep clear: what came from the health engine's rules,
+/// and what came from a language model.
+class _PhotoNotes extends StatelessWidget {
+  const _PhotoNotes({required this.notes, required this.onDismiss});
+
+  final List<String> notes;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final HpPalette p = context.hp;
+
+    return Semantics(
+      liveRegion: true,
+      container: true,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(
+          HpSpacing.md,
+          HpSpacing.md,
+          HpSpacing.sm,
+          HpSpacing.md,
+        ),
+        decoration: BoxDecoration(
+          color: p.calmSoft,
+          borderRadius: HpRadii.cardRadius,
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Icon(Icons.info_outline_rounded, size: 18, color: p.calmInk),
+            const SizedBox(width: HpSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  for (final String note in notes)
+                    Padding(
+                      padding: EdgeInsets.only(
+                        bottom: note == notes.last ? 0 : HpSpacing.sm,
+                      ),
+                      child: Text(
+                        note,
+                        style: HpType.label.copyWith(color: p.ink),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close_rounded, size: 18),
+              tooltip: 'Dismiss',
+              onPressed: onDismiss,
+            ),
+          ],
+        ),
       ),
     );
   }
