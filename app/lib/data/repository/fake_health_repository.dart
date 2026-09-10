@@ -33,6 +33,14 @@ class FakeHealthRepository implements HealthRepository {
   HealthProfile? _profile;
   double _hydrationMl = 900;
 
+  /// The reminders as they stand, so a toggle made on the reminders screen is
+  /// still there when the screen is opened again. Started from the sample list
+  /// with the quiet-hours flags worked out, which is what the backend sends.
+  AlertPlan _alerts = _rebuilt(
+    alerts: _sampleAlerts.alerts,
+    quietHours: _sampleAlerts.quietHours,
+  );
+
   /// What has been marked eaten or skipped, newest write wins.
   ///
   /// Keyed by plan item id. The real backend keeps an append-only trail; the
@@ -276,7 +284,121 @@ class FakeHealthRepository implements HealthRepository {
   }
 
   @override
-  Future<AlertPlan> loadAlerts() => _settle(_sampleAlerts);
+  Future<AlertPlan> loadAlerts() => _settle(_alerts);
+
+  /// Turn a type on or off, the way `PATCH /v1/alerts/{alert_type}` does.
+  ///
+  /// Including the refusal. The backend keeps escalations always on, and a fake
+  /// that cheerfully switched them off would let a screen be built against a
+  /// promise the real server does not keep.
+  @override
+  Future<AlertPlan> setAlertEnabled(
+    String alertType, {
+    required bool enabled,
+  }) async {
+    if (alertType == AlertDefinition.escalationType && !enabled) {
+      throw const HealthRepositoryException(
+        'Escalation alerts cannot be switched off. They only appear when '
+        'something in your results needs a doctor.',
+      );
+    }
+    _alerts = _rebuilt(
+      alerts: <AlertDefinition>[
+        for (final AlertDefinition alert in _alerts.alerts)
+          if (alert.alertType == alertType)
+            AlertDefinition(
+              alertType: alert.alertType,
+              title: alert.title,
+              body: alert.body,
+              at: alert.at,
+              id: alert.id,
+              enabled: enabled,
+            )
+          else
+            alert,
+      ],
+      quietHours: _alerts.quietHours,
+    );
+    return _settle(_alerts);
+  }
+
+  @override
+  Future<AlertPlan> setQuietHours({
+    required String start,
+    required String end,
+  }) {
+    _alerts = _rebuilt(
+      alerts: _alerts.alerts,
+      quietHours: QuietHours(start: start, end: end),
+    );
+    return _settle(_alerts);
+  }
+
+  /// Rebuild the plan with `suppressed_by_quiet_hours` worked out again.
+  ///
+  /// The real backend recomputes that flag on every write and sends it down
+  /// with the list, so the fake does the same rather than leaving a stale flag
+  /// behind: a screen built against a fake that never updates it would look
+  /// right here and be wrong on a phone.
+  static AlertPlan _rebuilt({
+    required List<AlertDefinition> alerts,
+    required QuietHours quietHours,
+  }) {
+    return AlertPlan(
+      alerts: <AlertDefinition>[
+        for (final AlertDefinition alert in alerts)
+          AlertDefinition(
+            alertType: alert.alertType,
+            title: alert.title,
+            body: alert.body,
+            at: alert.at,
+            id: alert.id,
+            enabled: alert.enabled,
+            suppressedByQuietHours:
+                !alert.alwaysOn && quietHours.covers(alert.at),
+          ),
+      ],
+      quietHours: quietHours,
+    );
+  }
+
+  /// A small, believable version of what `GET /v1/privacy/export` answers with.
+  ///
+  /// The real document is the whole account, table by table. This one has the
+  /// same shape and enough in it that the export screen can be built and tested
+  /// — and, like everything else here, it belongs to a fictional person.
+  @override
+  Future<Map<String, dynamic>> exportEverything() {
+    return _settle(<String, dynamic>{
+      'exported_at': '2026-09-10T06:30:00Z',
+      'tables': <String, dynamic>{
+        'profiles': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'display_name': _session?.displayName ?? 'Sai Muthiki',
+            'locale': 'en_IN',
+            'timezone': 'Asia/Kolkata',
+          },
+        ],
+        'lab_results': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'biomarker_code': 'vitamin_d',
+            'value': 18,
+            'unit': 'ng/mL',
+            'measured_on': '2026-08-14',
+          },
+          <String, dynamic>{
+            'biomarker_code': 'hemoglobin',
+            'value': 11.8,
+            'unit': 'g/dL',
+            'measured_on': '2026-08-14',
+          },
+        ],
+        'alerts': <Map<String, dynamic>>[
+          for (final AlertDefinition alert in _alerts.alerts) alert.toJson(),
+        ],
+      },
+    });
+  }
 
   @override
   Future<HealthReport> uploadReport({
@@ -321,6 +443,14 @@ class FakeHealthRepository implements HealthRepository {
         title: 'Water',
         body: 'Time for a glass of water.',
         at: '23:30',
+      ),
+      // The one type nobody can switch off, and the reason the reminders screen
+      // has to explain itself rather than simply drawing another switch.
+      AlertDefinition(
+        alertType: AlertDefinition.escalationType,
+        title: 'A result your doctor should see',
+        body: 'Your potassium reading is one to speak to a doctor about today.',
+        at: '09:00',
       ),
     ],
     quietHours: QuietHours(start: '22:30', end: '06:00'),

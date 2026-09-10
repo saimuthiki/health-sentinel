@@ -79,6 +79,40 @@ abstract class HealthRepository {
   /// arriving with the app closed, with no signal, and with the backend asleep.
   Future<AlertPlan> loadAlerts();
 
+  /// Turn one kind of reminder on or off, and get the whole plan back.
+  ///
+  /// [alertType] is the wire string the backend uses — `hydration`, `meal`,
+  /// `sleep` and the rest — not a display name. The reply is the complete plan
+  /// as it now stands, including which alerts quiet hours will hold, because
+  /// that judgement is made on the server and working it out again on the phone
+  /// is how two answers to one question get started.
+  ///
+  /// Escalations — the reminders that say a result needs a doctor — cannot be
+  /// switched off, and asking to is refused rather than quietly ignored.
+  Future<AlertPlan> setAlertEnabled(
+    String alertType, {
+    required bool enabled,
+  });
+
+  /// Set the window in which the phone stays quiet, and get the plan back.
+  ///
+  /// Both times are 24-hour `HH:mm`. A window that crosses midnight — 22:30 to
+  /// 06:00, which is the ordinary case — is perfectly acceptable; deciding what
+  /// falls inside it is the server's job and not this app's.
+  Future<AlertPlan> setQuietHours({
+    required String start,
+    required String end,
+  });
+
+  /// Everything the backend holds about this account, as one JSON document.
+  ///
+  /// This is the whole health record — profile, reports, values, plans, chat,
+  /// consents — so it is fetched when it is asked for, handed straight to
+  /// whoever asked, and never written to the app's own storage: a second copy
+  /// of somebody's medical history that they did not ask for is exactly what
+  /// this app must not leave lying about.
+  Future<Map<String, dynamic>> exportEverything();
+
   /// Send one report file and get back what came out of it.
   ///
   /// [onProgress] reports bytes leaving the phone, which is not the same as the

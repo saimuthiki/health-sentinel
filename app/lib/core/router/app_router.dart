@@ -5,10 +5,12 @@ import '../../features/auth/sign_in_screen.dart';
 import '../../features/auth/sign_up_screen.dart';
 import '../../features/chat/chat_screen.dart';
 import '../../features/common/consent_routing.dart';
+import '../../features/export/export_screen.dart';
 import '../../features/more/more_screen.dart';
 import '../../features/onboarding/consent_screen.dart';
 import '../../features/plan/plan_screen.dart';
 import '../../features/profile/health_profile_screen.dart';
+import '../../features/reminders/reminders_screen.dart';
 import '../../features/reports/report_detail_screen.dart';
 import '../../features/reports/reports_screen.dart';
 import '../../features/setup/not_configured_screen.dart';
@@ -131,6 +133,23 @@ GoRouter buildAppRouter() {
                 path: '/more',
                 builder: (BuildContext context, GoRouterState state) =>
                     const MoreScreen(),
+                // Both of these are settings screens reached from a tile on
+                // More, so they are children of it rather than top-level
+                // routes: the tab bar stays where it is, the More tab keeps
+                // its place in the stack, and going back is going back to the
+                // list the tile was on.
+                routes: <RouteBase>[
+                  GoRoute(
+                    path: 'reminders',
+                    builder: (BuildContext context, GoRouterState state) =>
+                        const RemindersScreen(),
+                  ),
+                  GoRoute(
+                    path: 'export',
+                    builder: (BuildContext context, GoRouterState state) =>
+                        const ExportScreen(),
+                  ),
+                ],
               ),
             ],
           ),

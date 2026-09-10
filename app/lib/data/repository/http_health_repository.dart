@@ -607,6 +607,72 @@ class HttpHealthRepository implements HealthRepository, CacheAware {
     }
   }
 
+  /// `PATCH /v1/alerts/{alert_type}` with the one field the endpoint allows.
+  ///
+  /// `ToggleIn` is declared `extra="forbid"` in `backend/app/api/alerts.py`, so
+  /// anything sent beside `enabled` is a 422 rather than something quietly
+  /// dropped. The reply is the whole alert list again — the same shape
+  /// `GET /v1/alerts` answers with — so the fresh copy is cached exactly as a
+  /// read would be, and the phone never has to guess what changed.
+  ///
+  /// Switching off an escalation is refused by the server, which is the point:
+  /// a card telling somebody to see a doctor is not a preference.
+  @override
+  Future<AlertPlan> setAlertEnabled(
+    String alertType, {
+    required bool enabled,
+  }) async {
+    try {
+      final Map<String, dynamic> json = await _api.patchMap(
+        '/v1/alerts/${Uri.encodeComponent(alertType)}',
+        body: <String, dynamic>{'enabled': enabled},
+      );
+      await _cache.write(OfflineCache.alerts, json);
+      return Wire.alertsFrom(json);
+    } on ApiFailure catch (failure) {
+      throw _wrap(failure);
+    }
+  }
+
+  /// `PUT /v1/alerts/quiet-hours`, which answers with the whole list again.
+  ///
+  /// `QuietHoursIn` forbids extra fields too, and it validates both times, so
+  /// only `start` and `end` are sent and both are the 24-hour `HH:mm` the
+  /// backend parses. Nothing here decides which reminders the window covers:
+  /// the reply already says, per alert, whether quiet hours will hold it.
+  @override
+  Future<AlertPlan> setQuietHours({
+    required String start,
+    required String end,
+  }) async {
+    try {
+      final Map<String, dynamic> json = await _api.putMap(
+        '/v1/alerts/quiet-hours',
+        body: <String, dynamic>{'start': start, 'end': end},
+      );
+      await _cache.write(OfflineCache.alerts, json);
+      return Wire.alertsFrom(json);
+    } on ApiFailure catch (failure) {
+      throw _wrap(failure);
+    }
+  }
+
+  /// `GET /v1/privacy/export` — the whole record, as one JSON object.
+  ///
+  /// Two deliberate choices. It is asked for on the long timeout, because this
+  /// reads every table the account owns and the free host may have to wake up
+  /// first, and twenty seconds is the budget for reading a row rather than for
+  /// reading a life. And nothing is cached: this is the complete health record,
+  /// and the one place it belongs is the file the person chose to save it to.
+  @override
+  Future<Map<String, dynamic>> exportEverything() async {
+    try {
+      return await _api.getMap('/v1/privacy/export', generates: true);
+    } on ApiFailure catch (failure) {
+      throw _wrap(failure);
+    }
+  }
+
   ApiRepositoryException _wrap(ApiFailure failure) =>
       ApiRepositoryException(failure);
 }

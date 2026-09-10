@@ -82,7 +82,7 @@ class MoreScreen extends ConsumerWidget {
               icon: Icons.notifications_none_rounded,
               title: 'Reminders',
               subtitle: 'Water, meals, movement, sleep and quiet hours',
-              onTap: () {},
+              onTap: () => context.go('/more/reminders'),
             ),
             const SizedBox(height: HpSpacing.section),
             const HpSectionHeader(title: 'Your data'),
@@ -90,7 +90,7 @@ class MoreScreen extends ConsumerWidget {
               icon: Icons.file_download_outlined,
               title: 'Export everything',
               subtitle: 'A copy of your reports, values, plans and chat',
-              onTap: () {},
+              onTap: () => context.go('/more/export'),
             ),
             _MoreTile(
               icon: Icons.delete_outline_rounded,
