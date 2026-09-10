@@ -30,10 +30,13 @@ android {
     // the Flutter plugins, require their consumers to compile against API 36.
     compileSdk = 36
 
-    // Pinned rather than inherited from `flutter.ndkVersion`: several plugins in
-    // this app declare NDK 27, and Android Gradle Plugin 8.7 fails the build when
-    // the application module asks for an older one.
-    ndkVersion = "27.0.12077973"
+    // Pinned rather than inherited from `flutter.ndkVersion` because the plugins
+    // do not agree with Flutter's default. The build warned:
+    //   "jni requires Android NDK 28.2.13676358" while the project asked for
+    //   27.0.12077973.
+    // NDK releases are backward compatible, so the rule is to take the highest
+    // any plugin asks for. Raise this when a build names a higher one.
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
