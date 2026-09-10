@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -170,16 +172,14 @@ class _TodayBody extends ConsumerWidget {
           ],
 
           // Below the escalations, never above them: if this day came off the
-          // phone rather than off the network, say so and say what is missing
-          // as a result. Nothing cached is ever shown as though it were current.
-          if (cachedAt != null) ...<Widget>[
-            HpStaleNotice(
-              storedAt: cachedAt,
-              detail: 'You are offline, so nothing new was checked \u2014 '
-                  'including anything that would need a doctor.',
-            ),
-            const SizedBox(height: HpSpacing.xxl),
-          ],
+          // phone rather than off the network, say so, and keep saying it until
+          // it stops being true. Nothing cached is ever shown as though it were
+          // current. The widget also owns the quiet retry, so the notice takes
+          // itself away instead of waiting to be pulled down on.
+          _StaleDayNotice(
+            key: const ValueKey<String>('today-stale-day-notice'),
+            cachedAt: cachedAt,
+          ),
 
           HpSectionHeader(
             title: 'Your day',
@@ -362,3 +362,143 @@ class _FocusCard extends StatelessWidget {
 DateTime? _servedFromCacheAt(Object repository) => repository is CacheAware
     ? repository.servedFromCacheAt(CacheAware.cacheSubjectToday)
     : null;
+
+/// The stale notice, and the retry that makes it go away by itself.
+///
+/// Both live in one widget because they are one behaviour. Before this, the
+/// only thing that ever cleared the cached-copy flag was a *successful*
+/// `loadToday`, and the only thing that asked for one was the person pulling the
+/// screen down: the backend could come back a minute later and Today would still
+/// be showing yesterday, with the notice still on it, until he thought to try.
+/// A notice that cannot clear itself is not a warning, it is furniture.
+///
+/// So while the day on screen is a saved one, this quietly asks for a fresh one
+/// every half minute. Two rules keep that from being a nuisance:
+///
+/// * It never asks while a request is already in flight. The health engine is on
+///   free hosting and a cold start takes the better part of a minute; throwing
+///   the wait away every thirty seconds would mean it never finishes waking.
+/// * When one gets through, the notice is replaced for a few seconds by a line
+///   saying so, rather than vanishing and leaving him wondering whether he
+///   imagined it.
+///
+/// It keeps itself alive when scrolled off, because the retry should not stop
+/// merely because he has scrolled down to look at his afternoon.
+class _StaleDayNotice extends ConsumerStatefulWidget {
+  const _StaleDayNotice({super.key, required this.cachedAt});
+
+  /// When the day on screen was fetched, or null when it came off the network.
+  final DateTime? cachedAt;
+
+  @override
+  ConsumerState<_StaleDayNotice> createState() => _StaleDayNoticeState();
+}
+
+class _StaleDayNoticeState extends ConsumerState<_StaleDayNotice>
+    with AutomaticKeepAliveClientMixin {
+  /// How often a saved day quietly tries the network again.
+  static const Duration _retryEvery = Duration(seconds: 30);
+
+  /// How long "up to date" stays before the screen is his own again.
+  static const Duration _confirmFor = Duration(seconds: 6);
+
+  Timer? _retry;
+  Timer? _confirmation;
+  bool _confirmed = false;
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.cachedAt != null) {
+      _startRetrying();
+    }
+  }
+
+  @override
+  void didUpdateWidget(_StaleDayNotice oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final bool wasStale = oldWidget.cachedAt != null;
+    final bool isStale = widget.cachedAt != null;
+    if (isStale && !wasStale) {
+      _startRetrying();
+    } else if (wasStale && !isStale) {
+      // A fetch got through. Stop asking, and say so.
+      _stopRetrying();
+      _confirm();
+    }
+  }
+
+  @override
+  void dispose() {
+    _retry?.cancel();
+    _confirmation?.cancel();
+    super.dispose();
+  }
+
+  void _startRetrying() {
+    _retry?.cancel();
+    _retry = Timer.periodic(_retryEvery, (Timer timer) => _tryAgain());
+  }
+
+  void _stopRetrying() {
+    _retry?.cancel();
+    _retry = null;
+  }
+
+  void _tryAgain() {
+    if (!mounted) {
+      return;
+    }
+    if (ref.read(todayProvider).isLoading) {
+      // Already asking. Leave it alone: a cold start needs about a minute and
+      // restarting it would reset that minute.
+      return;
+    }
+    // Invalidate rather than refresh: nothing here needs the answer, the screen
+    // is already watching for it, and the day stays on screen while it is
+    // fetched instead of collapsing into a spinner.
+    ref.invalidate(todayProvider);
+  }
+
+  void _confirm() {
+    _confirmation?.cancel();
+    setState(() => _confirmed = true);
+    _confirmation = Timer(_confirmFor, () {
+      if (mounted) {
+        setState(() => _confirmed = false);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final DateTime? cachedAt = widget.cachedAt;
+
+    if (cachedAt != null) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          HpStaleNotice(
+            storedAt: cachedAt,
+            checking: ref.watch(todayProvider).isLoading,
+          ),
+          const SizedBox(height: HpSpacing.xxl),
+        ],
+      );
+    }
+    if (_confirmed) {
+      return const Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          HpFreshNotice(),
+          SizedBox(height: HpSpacing.xxl),
+        ],
+      );
+    }
+    return const SizedBox.shrink();
+  }
+}
