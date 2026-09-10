@@ -18,11 +18,14 @@ import 'package:healthpulse/features/grocery/grocery_screen.dart';
 ///
 /// * the list arrives grouped into aisles, with the backend's column values
 ///   turned into English rather than shown raw;
+/// * a line says both numbers — what is already at home and what is left to
+///   bring — and ticking one moves the weight from the second to the first;
 /// * ticking a line reaches the backend as that line and that state;
 /// * a refused tick leaves the box showing what the backend actually holds,
 ///   says why on that line and nowhere else, and leaves no spinner running;
 /// * a second tap while the first is in flight sends nothing;
-/// * an empty list says which kind of empty it is.
+/// * an empty list says which kind of empty it is, from the count of planned
+///   days the backend sends rather than by hedging.
 void main() {
   group('the week’s list', () {
     testWidgets('arrives grouped into aisles, with readable headings',
@@ -48,6 +51,12 @@ void main() {
       expect(find.text('616 g · Still to buy'), findsOneWidget);
       // Past a thousand grams, kilograms.
       expect(find.text('1.2 kg · Still to buy'), findsOneWidget);
+      // A line the kitchen partly covers says both halves of it, which is the
+      // whole point of the pantry: 839 g needed, 300 g of it already there.
+      expect(find.text('300 g at home · bring 539 g'), findsOneWidget);
+      // And one it covers entirely says there is nothing to bring — while
+      // staying on the list, so it can be unticked.
+      expect(find.text('770 g at home · nothing to bring'), findsOneWidget);
       // What the backend already holds is what is ticked.
       expect(checkboxFor(tester, 'Spinach').value, isTrue);
       expect(checkboxFor(tester, 'Ragi flour').value, isFalse);
@@ -77,6 +86,11 @@ void main() {
 
       expect(repository.writes, <String>['gi1=have']);
       expect(checkboxFor(tester, 'Ragi flour').value, isTrue);
+      // The weight moves with the tick: the whole of what the week needs is
+      // now claimed to be in the kitchen, so there is nothing left to bring.
+      // The server writes exactly that against the food, and this is what it
+      // will answer with on the next read.
+      expect(find.text('616 g at home · nothing to bring'), findsOneWidget);
       // The line that was not touched is untouched.
       expect(checkboxFor(tester, 'Kidney beans').value, isFalse);
       expect(find.byType(CircularProgressIndicator), findsNothing);
@@ -95,6 +109,10 @@ void main() {
 
       expect(repository.writes, <String>['gi3=need']);
       expect(checkboxFor(tester, 'Spinach').value, isFalse);
+      // Unticking forgets the claim, so the whole 770 g the week needs is to
+      // bring again — the correction has to be worth something, or there was
+      // no point in offering it.
+      expect(find.text('770 g · Still to buy'), findsOneWidget);
     });
 
     testWidgets('"I bought this" sends bought, not have',
@@ -223,18 +241,53 @@ void main() {
       (WidgetTester tester) async {
     useTallSurface(tester);
 
-    await tester.pumpWidget(groceryApp(_GroceryRepository(empty: true)));
+    // None of the seven days planned, which is what the backend counted on the
+    // request that built this list.
+    await tester.pumpWidget(
+      groceryApp(_GroceryRepository(empty: true, plannedDays: 0)),
+    );
     await settleWithoutAnimations(tester);
 
     expect(find.text('Nothing to buy for this week yet'), findsOneWidget);
-    // The reason, not just the absence: an empty list almost always means the
-    // week has not been planned, and the way out of it is the plan.
+    // The reason, not just the absence: nothing is planned, and the way out of
+    // it is the plan.
     expect(
       find.textContaining('have not been planned yet'),
       findsOneWidget,
     );
     expect(find.widgetWithText(HpButton, 'Open your plan'), findsOneWidget);
     expect(find.byType(Checkbox), findsNothing);
+  });
+
+  testWidgets('an empty list on a planned week says it is not a fault',
+      (WidgetTester tester) async {
+    useTallSurface(tester);
+
+    // The opposite case, and it used to be indistinguishable from the one
+    // above: every day is planned and every ingredient came to under five
+    // grams. Somebody standing in front of this deserves to be told it is not
+    // a fault rather than sent to plan a week that is already planned.
+    await tester.pumpWidget(
+      groceryApp(_GroceryRepository(empty: true, plannedDays: 7)),
+    );
+    await settleWithoutAnimations(tester);
+
+    expect(find.text('Nothing worth writing down this week'), findsOneWidget);
+    expect(find.textContaining('is not a fault'), findsOneWidget);
+    expect(find.textContaining('have not been planned yet'), findsNothing);
+  });
+
+  testWidgets('an empty list on a half-planned week says how far it got',
+      (WidgetTester tester) async {
+    useTallSurface(tester);
+
+    await tester.pumpWidget(
+      groceryApp(_GroceryRepository(empty: true, plannedDays: 3)),
+    );
+    await settleWithoutAnimations(tester);
+
+    expect(find.textContaining('3 days of the week beginning'), findsOneWidget);
+    expect(find.textContaining('The other 4 days have'), findsOneWidget);
   });
 
   testWidgets('a failed fetch offers a way back in',
@@ -329,6 +382,7 @@ class _GroceryRepository extends FakeHealthRepository {
     this.refuseItemId,
     this.holdWrites = false,
     this.empty = false,
+    this.plannedDays,
     this.refuseLoad = false,
   }) : super(latency: Duration.zero, signedIn: true);
 
@@ -341,6 +395,10 @@ class _GroceryRepository extends FakeHealthRepository {
 
   /// Answer with a list that has no lines on it.
   final bool empty;
+
+  /// How many of the week's days the backend says are planned behind the list.
+  /// Null is what a plain read sends, so that case is exercised too.
+  final int? plannedDays;
 
   /// Not final: a test turns it off to prove "Try again" really tries again.
   bool refuseLoad;
@@ -370,6 +428,7 @@ class _GroceryRepository extends FakeHealthRepository {
     }
     return GroceryList(
       weekStart: DateTime(2026, 9, 7),
+      plannedDays: plannedDays,
       items: empty
           ? const <GroceryItem>[]
           : <GroceryItem>[
@@ -398,7 +457,13 @@ class _GroceryRepository extends FakeHealthRepository {
   }
 
   /// Two aisles with more than one line and two with one, so grouping is
-  /// actually exercised, and one line already at home so both states show.
+  /// actually exercised; one line nothing is known about, one the kitchen
+  /// partly covers, and one it covers entirely, so all three shapes of the
+  /// amount line show.
+  ///
+  /// `quantity` is what is still to bring and `have` is what the kitchen is
+  /// credited with, exactly as `GET /v1/grocery` sends them: the week's
+  /// requirement is the two added together.
   static const List<GroceryItem> _lines = <GroceryItem>[
     GroceryItem(
       id: 'gi1',
@@ -414,18 +479,22 @@ class _GroceryRepository extends FakeHealthRepository {
       quantity: 1155,
       aisle: 'cereal_millet',
     ),
+    // 839 g needed for the week, 300 g of it already in the kitchen.
     GroceryItem(
       id: 'gi2',
       foodId: 'rajma',
       name: 'Kidney beans',
       quantity: 539,
+      have: 300,
       aisle: 'pulse_legume',
     ),
+    // Covered entirely: nothing to bring, but still a line to untick.
     GroceryItem(
       id: 'gi3',
       foodId: 'spinach',
       name: 'Spinach',
-      quantity: 770,
+      quantity: 0,
+      have: 770,
       aisle: 'leafy_vegetable',
       state: GroceryState.have,
     ),

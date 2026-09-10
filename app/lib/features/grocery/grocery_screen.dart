@@ -13,7 +13,7 @@ import '../common/failure_copy.dart';
 
 /// The week's shopping list: what the plan needs, and what is already at home.
 ///
-/// Four decisions are worth knowing before reading the code, because each of
+/// Five decisions are worth knowing before reading the code, because each of
 /// them is a choice rather than an accident.
 ///
 /// **The list is not a list of healthy things somebody typed out.** It is added
@@ -24,6 +24,16 @@ import '../common/failure_copy.dart';
 /// person has said they like, so the list changes when any of those change. The
 /// screen says so in as many words, because a list that quietly changed week to
 /// week with no explanation would look like a bug.
+///
+/// **A tick is remembered somewhere the list cannot lose it.** Ticking says "it
+/// is already in my kitchen", and the server writes that against the food
+/// itself (`pantry_items`) rather than against this week's row, which is deleted
+/// and rewritten every time the list is rebuilt. So the line comes back ticked,
+/// and — this is the point of the whole feature — the weight comes off what
+/// there is to bring: "400 g at home · bring 600 g". The credit fades over the
+/// following days, because the week's meals are eating it, so the same line asks
+/// for a little more as the week goes on. None of that arithmetic is repeated
+/// here; the screen shows the two numbers it is sent.
 ///
 /// **A tick box never moves on its own.** It is drawn from the state the
 /// backend last confirmed, the tap sends a request, and the box only moves when
@@ -215,7 +225,10 @@ class _GroceryScreenState extends ConsumerState<GroceryScreen> {
 
     if (list.items.isEmpty) {
       return SingleChildScrollView(
-        child: _EmptyList(weekStart: list.weekStart),
+        child: _EmptyList(
+          weekStart: list.weekStart,
+          plannedDays: list.plannedDays,
+        ),
       );
     }
 
@@ -235,8 +248,10 @@ class _GroceryScreenState extends ConsumerState<GroceryScreen> {
         ),
         const SizedBox(height: HpSpacing.md),
         Text(
-          'Tick what you already have at home. Whatever is left unticked is '
-          'what to bring.',
+          'Tick what you already have at home and its weight comes off the '
+          'line, so what is left is what to bring. That is remembered against '
+          'the food, not against this list, and it fades over the days as the '
+          'week cooks through it.',
           style: HpType.reading.copyWith(color: p.inkMuted),
         ),
         const SizedBox(height: HpSpacing.section),
@@ -419,9 +434,10 @@ class _GroceryRow extends StatelessWidget {
               const SizedBox(height: HpSpacing.sm),
               // A third state the tick box cannot express. Ticking says "it is
               // in my kitchen"; this says "I picked it up on this week's shop".
-              // Both mean do not buy it, and keeping them apart is what would
-              // one day let the backend take a real pantry off next week's
-              // quantities.
+              // Both mean do not buy it, and keeping them apart is what stops
+              // the pantry lying: a tick stocks the cupboard for next week's
+              // sums, a purchase does not, because what was bought for this
+              // week is what this week's meals will eat.
               HpTextAction(
                 label: 'I bought this',
                 icon: Icons.shopping_basket_outlined,
@@ -458,13 +474,24 @@ class _GroceryRow extends StatelessWidget {
     );
   }
 
-  /// "900 g · Still to buy", or just the state when there is no quantity.
+  /// "900 g · Still to buy", "400 g at home · bring 600 g", or "at home ·
+  /// nothing to bring" once the kitchen covers the line.
+  ///
+  /// The split is only spoken about when there is something at home to speak
+  /// about: a line nothing has been said about reads exactly as it always did.
+  /// A bought line keeps saying so rather than talking about the kitchen —
+  /// buying something is not the same fact as having had it, and the amount
+  /// beside it is what the week needs.
   String _amountLine() {
-    final String amount = item.quantityLabel;
-    if (amount.isEmpty) {
-      return item.state.label;
+    final String toBuy = item.quantityLabel;
+    final String atHome = item.haveLabel;
+    if (item.state == GroceryState.bought || atHome.isEmpty) {
+      return toBuy.isEmpty ? item.state.label : '$toBuy · ${item.state.label}';
     }
-    return '$amount · ${item.state.label}';
+    if (toBuy.isEmpty) {
+      return '$atHome at home · nothing to bring';
+    }
+    return '$atHome at home · bring $toBuy';
   }
 }
 
@@ -479,26 +506,59 @@ class _GroceryRow extends StatelessWidget {
 /// is mentioned rather than hidden, because somebody standing in front of an
 /// empty screen with a planned week deserves to know it is not a fault.
 ///
-/// The backend cannot currently tell the two apart for us: `GroceryListOut`
-/// carries no count of the planned days behind it. That is written up as a
-/// backend change worth making rather than guessed at here.
+/// The backend now says which: `GroceryListOut.planned_days` counts the days of
+/// the week that have a plan behind the list. It is null when the backend did
+/// not count them, which it only skips on a request that read stored rows — and
+/// a list read from stored rows is never empty. So the hedging version below is
+/// a fallback that should not be reachable, kept because "we did not count" is
+/// not the same answer as "nothing is planned" and must never be printed as if
+/// it were.
 class _EmptyList extends StatelessWidget {
-  const _EmptyList({required this.weekStart});
+  const _EmptyList({required this.weekStart, required this.plannedDays});
 
   final DateTime weekStart;
+
+  /// How many of the seven days have a plan. Null when it was not counted.
+  final int? plannedDays;
 
   @override
   Widget build(BuildContext context) {
     return HpEmptyState(
       icon: Icons.shopping_cart_outlined,
-      title: 'Nothing to buy for this week yet',
-      body: 'Your list is added up from the meals already planned for the week '
-          'beginning ${HpFormat.dayShort(weekStart)} — so an empty list almost '
-          'always means those days have not been planned yet. Plan a day and '
-          'its ingredients appear here. If the week is planned, everything in '
-          'it is in amounts too small to be worth a line.',
+      title: plannedDays == 7
+          ? 'Nothing worth writing down this week'
+          : 'Nothing to buy for this week yet',
+      body: _body(plannedDays, HpFormat.dayShort(weekStart)),
       actionLabel: 'Open your plan',
       onAction: () => context.go('/plan'),
     );
+  }
+
+  /// The reason, in the words that fit the number of planned days there are.
+  static String _body(int? planned, String week) {
+    if (planned == null) {
+      return 'Your list is added up from the meals already planned for the '
+          'week beginning $week — so an empty list almost always means those '
+          'days have not been planned yet. Plan a day and its ingredients '
+          'appear here.';
+    }
+    if (planned <= 0) {
+      return 'Your list is added up from the meals already planned for the '
+          'week beginning $week, and those days have not been planned yet. '
+          'Plan one and its ingredients appear here.';
+    }
+    if (planned >= 7) {
+      return 'Every day of the week beginning $week is planned, so this is not '
+          'a fault: everything those meals need is in amounts under five grams, '
+          'which the list does not write down. There is genuinely nothing to '
+          'bring.';
+    }
+    final String some = planned == 1 ? 'One day' : '$planned days';
+    final String isAre = planned == 1 ? 'is' : 'are';
+    final int rest = 7 - planned;
+    final String left = rest == 1 ? 'The other day has' : 'The other $rest days have';
+    return '$some of the week beginning $week $isAre planned, and everything '
+        'those meals need is in amounts too small to be worth a line. $left '
+        'not been planned yet — plan one and its ingredients appear here.';
   }
 }

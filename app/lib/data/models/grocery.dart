@@ -11,6 +11,15 @@
 /// arithmetic over the plan, not a suggestion; the aisle is the food's own food
 /// group, so the list walks in the order of a shop.
 ///
+/// **A line carries two numbers.** What the week needs, and what the kitchen is
+/// already credited with (`pantry_items`, on the server). [GroceryItem.quantity]
+/// is what is left to bring home after the second is taken off the first, so a
+/// line can say "400 g at home · bring 600 g" rather than shrinking with no
+/// explanation. The credit fades over days — rice claimed on Monday is worth
+/// less by Friday, because the week has been cooking it — so the same list read
+/// two days apart can ask for a little more. That fading is the server's
+/// arithmetic and is never repeated here.
+///
 /// **There is no `toJson` on purpose.** These models are never written to the
 /// offline cache. A shopping list that was ticked on a train and then shown as
 /// though it were current would tell somebody they already have something they
@@ -72,6 +81,7 @@ class GroceryItem {
     required this.foodId,
     this.name = '',
     this.quantity = 0,
+    this.have = 0,
     this.unit = 'g',
     this.aisle = 'Other',
     this.state = GroceryState.need,
@@ -85,15 +95,28 @@ class GroceryItem {
   final String? id;
 
   /// The `foods` table id this line came from. Not shown; it is what the
-  /// backend would need if the pantry were ever fed back into the sums.
+  /// pantry is keyed on, server-side, so that ticking this line means something
+  /// next week as well as this one.
   final String foodId;
 
   /// The food's name from the reference table. Can be empty: the backend looks
   /// names up per list, and a food row that has since gone leaves this blank.
   final String name;
 
-  /// How much to buy. Already includes the tenth the planner adds on top.
+  /// How much is still to buy: the week's requirement, less what the kitchen is
+  /// credited with. Already includes the tenth the planner adds on top.
+  ///
+  /// Zero when the pantry covers the line. Such a line is still sent and still
+  /// drawn, because a line that vanished when it was ticked would leave nothing
+  /// to untick when the jar turns out to be empty.
   final double quantity;
+
+  /// How much of the requirement is already at home, as the server credits it.
+  ///
+  /// Zero for a line nothing has been said about. It is the *credited* amount,
+  /// not the amount claimed: the server fades a claim over the days since it was
+  /// made, and sends what is left.
+  final double have;
 
   /// Almost always `g`. Kept as the backend sent it rather than assumed.
   final String unit;
@@ -113,43 +136,72 @@ class GroceryItem {
     return trimmed.isEmpty ? foodId : trimmed;
   }
 
-  /// "900 g", "1.2 kg" — the amount as it would be said out loud.
+  /// What the week needs of this food in total, before the kitchen is taken off.
+  ///
+  /// Derived rather than sent: the endpoint splits the requirement into the two
+  /// halves and sends both, so adding them back up cannot disagree with it.
+  double get requirement => quantity + have;
+
+  /// "900 g", "1.2 kg" — the amount still to bring, as it would be said out loud.
   ///
   /// Grams turn into kilograms past a thousand for the same reason millilitres
   /// turn into litres elsewhere in the app: nobody buys 1 200 grams of rice.
   /// Any other unit is left exactly as the backend sent it, because guessing at
   /// a conversion we were not told about is how a quantity comes out wrong.
-  String get quantityLabel {
-    if (quantity <= 0) {
-      return '';
-    }
-    if (unit == 'g' && quantity >= 1000) {
-      return '${_trimmed(quantity / 1000)} kg';
-    }
-    return '${_trimmed(quantity)} $unit';
-  }
+  String get quantityLabel => _amountLabel(quantity);
 
-  /// The same line with a different state. Used when the backend has confirmed
-  /// a change, so the list on screen matches the list on the server.
-  GroceryItem withState(GroceryState next) => GroceryItem(
-        id: id,
-        foodId: foodId,
-        name: name,
-        quantity: quantity,
-        unit: unit,
-        aisle: aisle,
-        state: next,
-      );
+  /// The same, for what is already at home. Empty when nothing is.
+  String get haveLabel => _amountLabel(have);
+
+  /// The same line with a different state, and the amounts that state implies.
+  ///
+  /// The amounts have to be worked out here rather than read from the reply,
+  /// because `PATCH /v1/grocery/items/{item_id}` is read for its state and
+  /// nothing else — see [GroceryList.withItemState]. What is written mirrors
+  /// what the endpoint does, one for one: ticking records the whole of this
+  /// week's requirement in the pantry, dated now, so there is nothing left to
+  /// bring; unticking forgets the claim, so the whole requirement is to bring
+  /// again; and "I bought this" deliberately does not stock the pantry — what
+  /// was bought for this week is what this week eats — so the amounts stay
+  /// exactly as they were.
+  GroceryItem withState(GroceryState next) {
+    final double nextHave = switch (next) {
+      GroceryState.have => requirement,
+      GroceryState.need => 0.0,
+      GroceryState.bought => have,
+    };
+    return GroceryItem(
+      id: id,
+      foodId: foodId,
+      name: name,
+      quantity: requirement - nextHave,
+      have: nextHave,
+      unit: unit,
+      aisle: aisle,
+      state: next,
+    );
+  }
 
   factory GroceryItem.fromJson(Map<String, dynamic> json) => GroceryItem(
         id: asStringOrNull(json['id']),
         foodId: asString(json['food_id']),
         name: asString(json['name']),
         quantity: asDouble(json['quantity']),
+        have: asDouble(json['have']),
         unit: asString(json['unit'], fallback: 'g'),
         aisle: asString(json['aisle'], fallback: 'Other'),
         state: GroceryState.fromWire(json['state']),
       );
+
+  String _amountLabel(double value) {
+    if (value <= 0) {
+      return '';
+    }
+    if (unit == 'g' && value >= 1000) {
+      return '${_trimmed(value / 1000)} kg';
+    }
+    return '${_trimmed(value)} $unit';
+  }
 
   /// One decimal at most, and none at all for a whole number.
   static String _trimmed(double value) {
@@ -178,6 +230,7 @@ class GroceryList {
   const GroceryList({
     required this.weekStart,
     this.status = 'open',
+    this.plannedDays,
     this.items = const <GroceryItem>[],
   });
 
@@ -188,6 +241,16 @@ class GroceryList {
   /// `open` today. Kept because the backend sends it and a list that has been
   /// closed off is a state this screen would have to respect if it ever grows.
   final String status;
+
+  /// How many of the week's seven days have a plan behind this list.
+  ///
+  /// Null when the backend did not count them on this request, which it only
+  /// does when it rebuilt the list. That is not a gap: a list comes back empty
+  /// only from a request that rebuilt it, and the empty screen is the one place
+  /// the count decides what to say. Anything reading this must handle null
+  /// rather than treat it as zero — "we did not count" and "nothing is planned"
+  /// are opposite answers.
+  final int? plannedDays;
 
   final List<GroceryItem> items;
 
@@ -219,14 +282,17 @@ class GroceryList {
 
   /// The same list with one line's state replaced.
   ///
-  /// Only the state is touched. `PATCH /v1/grocery/items/{item_id}` answers
-  /// with a `GroceryItemOut` that has **no name on it** — the endpoint builds
-  /// its reply without the reference lookup the read does — so rebuilding a
-  /// whole line out of that reply would blank the label the person is reading.
+  /// Only that line is touched, and only by [GroceryItem.withState] — which
+  /// moves the amounts with the state, because ticking a line changes how much
+  /// of it is left to bring. `PATCH /v1/grocery/items/{item_id}` answers with a
+  /// `GroceryItemOut` that has **no name on it** — the endpoint builds its reply
+  /// without the reference lookup the read does — so rebuilding a whole line out
+  /// of that reply would blank the label the person is reading.
   GroceryList withItemState(String itemId, GroceryState next) {
     return GroceryList(
       weekStart: weekStart,
       status: status,
+      plannedDays: plannedDays,
       items: <GroceryItem>[
         for (final GroceryItem item in items)
           if (item.id == itemId) item.withState(next) else item,
@@ -238,6 +304,7 @@ class GroceryList {
         weekStart: asDate(json['week_start']) ??
             DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
         status: asString(json['status'], fallback: 'open'),
+        plannedDays: asIntOrNull(json['planned_days']),
         items: asMapList(json['items']).map(GroceryItem.fromJson).toList(),
       );
 }
