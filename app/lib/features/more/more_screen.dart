@@ -9,6 +9,7 @@ import '../../core/widgets/widgets.dart';
 import '../../data/models/models.dart';
 import '../../data/providers.dart';
 import '../common/failure_copy.dart';
+import '../profile/profile_routing.dart';
 
 /// Settings, data and the things that only get touched once.
 class MoreScreen extends ConsumerWidget {
@@ -76,13 +77,26 @@ class MoreScreen extends ConsumerWidget {
               icon: Icons.tune_rounded,
               title: 'Health profile',
               subtitle: 'Diet, allergies, meal times, sleep, goals',
-              onTap: () => context.go('/profile'),
+              // The summary of what is already saved, not the first-run
+              // wizard. This tile used to open the six-step form from question
+              // one with every box empty, which is why the owner reported that
+              // the app kept asking for his details again.
+              onTap: () => context.go(profileReviewPath),
             ),
             _MoreTile(
               icon: Icons.notifications_none_rounded,
               title: 'Reminders',
               subtitle: 'Water, meals, movement, sleep and quiet hours',
               onTap: () => context.go('/more/reminders'),
+            ),
+            const SizedBox(height: HpSpacing.section),
+            const HpSectionHeader(title: 'Your week'),
+            _MoreTile(
+              icon: Icons.shopping_cart_outlined,
+              title: 'Grocery list',
+              subtitle: 'What this week’s plan needs, and what you already '
+                  'have at home',
+              onTap: () => context.go('/more/grocery'),
             ),
             const SizedBox(height: HpSpacing.section),
             const HpSectionHeader(title: 'Your data'),

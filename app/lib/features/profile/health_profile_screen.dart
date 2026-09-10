@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -12,6 +11,8 @@ import '../../data/models/models.dart';
 import '../../data/providers.dart';
 import '../common/api_waking_notice.dart';
 import '../common/failure_copy.dart';
+import 'profile_inputs.dart';
+import 'profile_routing.dart';
 
 /// Setting up the health profile, in six short steps.
 ///
@@ -20,8 +21,29 @@ import '../common/failure_copy.dart';
 /// standing up. Every question says why it is being asked - people answer
 /// honestly when they can see what the answer is for - and everything except
 /// name, diet and the day's times is skippable.
+///
+/// **This screen is the first run, and only the first run.** It used to be the
+/// only way into the profile, which meant that tapping "Health profile" in More
+/// started the same six-step interrogation from question one with every box
+/// empty, whether you wanted to change your city or not. Coming back is now a
+/// different screen - `ProfileSummaryScreen`, at [profileReviewPath] - which
+/// shows what is already saved and lets one answer be changed on its own.
+///
+/// The wizard can still be asked for from there, by somebody who skipped
+/// questions the first time and would rather be walked through all of them
+/// again. That is what [returnToReview] is for: the same six steps, started
+/// from the answers already saved rather than from nothing, with a back control
+/// on step one and a finish that goes back to the summary instead of to Today.
 class HealthProfileScreen extends ConsumerStatefulWidget {
-  const HealthProfileScreen({super.key});
+  const HealthProfileScreen({super.key, this.returnToReview = false});
+
+  /// True when this wizard was opened from the summary rather than from consent.
+  ///
+  /// Set from the `return` query parameter in `core/router/app_router.dart`, the
+  /// same way `?blocked=1` is read on the consent screen. It changes none of the
+  /// questions; it only changes where "Back" on step one and "Save profile" on
+  /// step six lead, so that somebody who came from More is returned to More.
+  final bool returnToReview;
 
   @override
   ConsumerState<HealthProfileScreen> createState() =>
@@ -30,30 +52,6 @@ class HealthProfileScreen extends ConsumerStatefulWidget {
 
 class _HealthProfileScreenState extends ConsumerState<HealthProfileScreen> {
   static const int _totalSteps = 6;
-
-  static const List<String> _cuisines = <String>[
-    'South Indian',
-    'North Indian',
-    'Bengali',
-    'Gujarati',
-    'Maharashtrian',
-    'Andhra and Telangana',
-    'Kerala',
-    'Punjabi',
-    'Continental',
-    'East Asian',
-  ];
-
-  static const List<String> _conditions = <String>[
-    'Thyroid',
-    'Diabetes',
-    'High blood pressure',
-    'PCOS',
-    'Anaemia',
-    'High cholesterol',
-    'Acidity or reflux',
-    'Asthma',
-  ];
 
   int _step = 1;
   bool _saving = false;
@@ -65,8 +63,25 @@ class _HealthProfileScreenState extends ConsumerState<HealthProfileScreen> {
   final TextEditingController _weight = TextEditingController();
   final TextEditingController _city = TextEditingController();
   final TextEditingController _pincode = TextEditingController();
-  final TextEditingController _allergen = TextEditingController();
-  AllergySeverity _allergenSeverity = AllergySeverity.moderate;
+
+  @override
+  void initState() {
+    super.initState();
+    // Start the boxes from whatever the working copy already holds.
+    //
+    // A text controller has no idea a profile exists, so an empty one shows an
+    // empty box no matter what has been saved. On a genuine first run the
+    // working copy is empty and this changes nothing; when the wizard has been
+    // opened again from the summary, it is the difference between "here is
+    // what you told us, change what you like" and "type it all in again".
+    final HealthProfile current = ref.read(profileWizardProvider);
+    final double? heightCm = current.heightCm;
+    final double? weightKg = current.weightKg;
+    _height.text = heightCm == null ? '' : HpFormat.number(heightCm);
+    _weight.text = weightKg == null ? '' : HpFormat.number(weightKg);
+    _city.text = current.city ?? '';
+    _pincode.text = current.pincode ?? '';
+  }
 
   @override
   void dispose() {
@@ -74,7 +89,6 @@ class _HealthProfileScreenState extends ConsumerState<HealthProfileScreen> {
     _weight.dispose();
     _city.dispose();
     _pincode.dispose();
-    _allergen.dispose();
     super.dispose();
   }
 
@@ -96,9 +110,19 @@ class _HealthProfileScreenState extends ConsumerState<HealthProfileScreen> {
   }
 
   void _back() {
+    if (_saving) {
+      return;
+    }
     _commitTextFields();
     if (_step > 1) {
       setState(() => _step -= 1);
+      return;
+    }
+    // Step one, and there is somewhere behind it: the summary this wizard was
+    // opened from. Leaving here loses nothing, because everything typed so far
+    // is in the working copy and the summary reads the same copy.
+    if (widget.returnToReview) {
+      context.go(profileReviewPath);
     }
   }
 
@@ -151,22 +175,7 @@ class _HealthProfileScreenState extends ConsumerState<HealthProfileScreen> {
     if (!mounted) {
       return;
     }
-    context.go('/today');
-  }
-
-  Future<void> _pickDob() async {
-    final DateTime now = DateTime.now();
-    final DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: ref.read(profileWizardProvider).dob ??
-          DateTime(now.year - 30, now.month, now.day),
-      firstDate: DateTime(now.year - 110),
-      lastDate: now,
-      helpText: 'Your date of birth',
-    );
-    if (picked != null) {
-      _wizard.update((HealthProfile c) => c.copyWith(dob: picked));
-    }
+    context.go(widget.returnToReview ? profileReviewPath : '/today');
   }
 
   @override
@@ -174,6 +183,10 @@ class _HealthProfileScreenState extends ConsumerState<HealthProfileScreen> {
     final HpPalette p = context.hp;
     final HealthProfile profile = ref.watch(profileWizardProvider);
     final String? error = _error;
+    // On a first run there is nothing behind step one - consent has already
+    // been recorded and going back to it would undo nothing - so no control is
+    // offered that would do nothing. From the summary there always is.
+    final bool canGoBack = _step > 1 || widget.returnToReview;
 
     return Scaffold(
       body: SafeArea(
@@ -254,7 +267,7 @@ class _HealthProfileScreenState extends ConsumerState<HealthProfileScreen> {
                   ],
                   Row(
                     children: <Widget>[
-                      if (_step > 1) ...<Widget>[
+                      if (canGoBack) ...<Widget>[
                         HpButton(
                           label: 'Back',
                           tone: HpButtonTone.secondary,
@@ -341,61 +354,21 @@ class _HealthProfileScreenState extends ConsumerState<HealthProfileScreen> {
   }
 
   List<Widget> _aboutYou(HealthProfile profile) {
-    final HpPalette p = context.hp;
-    final DateTime? dob = profile.dob;
     return <Widget>[
       HpField(
         label: 'Date of birth',
         helper: 'Used only to pick the right reference range.',
-        child: Material(
-          color: p.surface,
-          borderRadius: HpRadii.fieldRadius,
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: _pickDob,
-            child: Container(
-              constraints: const BoxConstraints(minHeight: 56),
-              padding: const EdgeInsets.symmetric(
-                horizontal: HpSpacing.lg,
-                vertical: HpSpacing.md,
-              ),
-              decoration: BoxDecoration(
-                borderRadius: HpRadii.fieldRadius,
-                border: Border.all(color: p.outline),
-              ),
-              child: Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Text(
-                      dob == null
-                          ? 'Choose a date'
-                          : HpFormat.dayWithYear(dob),
-                      style: HpType.body.copyWith(
-                        color: dob == null ? p.inkFaint : p.ink,
-                      ),
-                    ),
-                  ),
-                  if (profile.ageYears != null)
-                    Text(
-                      '${profile.ageYears} years',
-                      style: HpType.label.copyWith(color: p.inkFaint),
-                    ),
-                  const SizedBox(width: HpSpacing.sm),
-                  Icon(Icons.event_outlined, size: 18, color: p.inkFaint),
-                ],
-              ),
-            ),
-          ),
+        child: ProfileDobRow(
+          dob: profile.dob,
+          ageYears: profile.ageYears,
+          onChanged: (DateTime picked) =>
+              _wizard.update((HealthProfile c) => c.copyWith(dob: picked)),
         ),
       ),
       HpField(
         label: 'Sex',
         helper: 'Reference ranges for haemoglobin, ferritin and others differ.',
-        child: HpChoiceGroup<Sex>(
-          choices: <HpChoice<Sex>>[
-            for (final Sex sex in Sex.values)
-              HpChoice<Sex>(value: sex, label: sex.label),
-          ],
+        child: profileSexChoices(
           selected: profile.sex,
           onChanged: (Sex value) =>
               _wizard.update((HealthProfile c) => c.copyWith(sex: value)),
@@ -408,17 +381,11 @@ class _HealthProfileScreenState extends ConsumerState<HealthProfileScreen> {
             child: HpField(
               label: 'Height',
               optional: true,
-              child: TextFormField(
+              child: profileNumberField(
+                fieldKey: profileHeightFieldKey,
                 controller: _height,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: <TextInputFormatter>[
-                  FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                ],
-                decoration: const InputDecoration(
-                  hintText: '168',
-                  suffixText: 'cm',
-                ),
+                hint: '168',
+                suffix: 'cm',
               ),
             ),
           ),
@@ -427,17 +394,11 @@ class _HealthProfileScreenState extends ConsumerState<HealthProfileScreen> {
             child: HpField(
               label: 'Weight',
               optional: true,
-              child: TextFormField(
+              child: profileNumberField(
+                fieldKey: profileWeightFieldKey,
                 controller: _weight,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: <TextInputFormatter>[
-                  FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                ],
-                decoration: const InputDecoration(
-                  hintText: '64',
-                  suffixText: 'kg',
-                ),
+                hint: '64',
+                suffix: 'kg',
               ),
             ),
           ),
@@ -450,15 +411,7 @@ class _HealthProfileScreenState extends ConsumerState<HealthProfileScreen> {
     return <Widget>[
       HpField(
         label: 'What do you eat?',
-        child: HpChoiceList<DietType>(
-          choices: <HpChoice<DietType>>[
-            for (final DietType diet in DietType.values)
-              HpChoice<DietType>(
-                value: diet,
-                label: diet.label,
-                detail: _dietDetail(diet),
-              ),
-          ],
+        child: profileDietChoices(
           selected: profile.dietType,
           onChanged: (DietType value) =>
               _wizard.update((HealthProfile c) => c.copyWith(dietType: value)),
@@ -467,11 +420,7 @@ class _HealthProfileScreenState extends ConsumerState<HealthProfileScreen> {
       HpField(
         label: 'Which food do you actually enjoy?',
         helper: 'Pick as many as you like. We start here and learn from there.',
-        child: HpMultiChoiceGroup<String>(
-          choices: <HpChoice<String>>[
-            for (final String cuisine in _cuisines)
-              HpChoice<String>(value: cuisine, label: cuisine),
-          ],
+        child: profileCuisineChoices(
           selected: profile.cuisinePrefs.toSet(),
           onToggled: _wizard.toggleCuisine,
         ),
@@ -479,84 +428,16 @@ class _HealthProfileScreenState extends ConsumerState<HealthProfileScreen> {
     ];
   }
 
-  static String _dietDetail(DietType diet) {
-    switch (diet) {
-      case DietType.veg:
-        return 'No meat, fish or egg. Dairy is fine.';
-      case DietType.nonVeg:
-        return 'Anything goes.';
-      case DietType.egg:
-        return 'Vegetarian, plus egg.';
-      case DietType.vegan:
-        return 'No animal products at all, including dairy and honey.';
-      case DietType.jain:
-        return 'No root vegetables, no onion or garlic.';
-    }
-  }
-
   List<Widget> _allergiesAndConditions(HealthProfile profile) {
-    final HpPalette p = context.hp;
     return <Widget>[
       HpField(
         label: 'Any food allergies?',
         helper: 'Nothing you list here will ever appear in a plan.',
         optional: true,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            if (profile.allergies.isNotEmpty) ...<Widget>[
-              Wrap(
-                spacing: HpSpacing.sm,
-                runSpacing: HpSpacing.sm,
-                children: <Widget>[
-                  for (final Allergy allergy in profile.allergies)
-                    InputChip(
-                      label: Text(
-                        '${allergy.allergen} · ${allergy.severity.label}',
-                      ),
-                      onDeleted: () => _wizard.removeAllergy(allergy.id),
-                      deleteIconColor: p.inkMuted,
-                    ),
-                ],
-              ),
-              const SizedBox(height: HpSpacing.md),
-            ],
-            TextFormField(
-              controller: _allergen,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                hintText: 'Peanuts, prawns, milk…',
-              ),
-              onFieldSubmitted: (String value) {
-                _wizard.addAllergy(value, _allergenSeverity);
-                _allergen.clear();
-              },
-            ),
-            const SizedBox(height: HpSpacing.md),
-            HpChoiceGroup<AllergySeverity>(
-              choices: <HpChoice<AllergySeverity>>[
-                for (final AllergySeverity severity in AllergySeverity.values)
-                  HpChoice<AllergySeverity>(
-                    value: severity,
-                    label: severity.label,
-                  ),
-              ],
-              selected: _allergenSeverity,
-              onChanged: (AllergySeverity value) =>
-                  setState(() => _allergenSeverity = value),
-            ),
-            const SizedBox(height: HpSpacing.md),
-            HpButton(
-              label: 'Add allergy',
-              tone: HpButtonTone.secondary,
-              expand: false,
-              icon: Icons.add_rounded,
-              onPressed: () {
-                _wizard.addAllergy(_allergen.text, _allergenSeverity);
-                _allergen.clear();
-              },
-            ),
-          ],
+        child: ProfileAllergyEditor(
+          allergies: profile.allergies,
+          onAdd: _wizard.addAllergy,
+          onRemove: _wizard.removeAllergy,
         ),
       ),
       HpField(
@@ -564,11 +445,7 @@ class _HealthProfileScreenState extends ConsumerState<HealthProfileScreen> {
         helper:
             'Only what you already know. HealthPulse never decides this for you.',
         optional: true,
-        child: HpMultiChoiceGroup<String>(
-          choices: <HpChoice<String>>[
-            for (final String condition in _conditions)
-              HpChoice<String>(value: condition, label: condition),
-          ],
+        child: profileConditionChoices(
           selected: profile.conditions.toSet(),
           onToggled: _wizard.toggleCondition,
         ),
@@ -628,15 +505,7 @@ class _HealthProfileScreenState extends ConsumerState<HealthProfileScreen> {
     return <Widget>[
       HpField(
         label: 'On a normal day',
-        child: HpChoiceList<ActivityLevel>(
-          choices: <HpChoice<ActivityLevel>>[
-            for (final ActivityLevel level in ActivityLevel.values)
-              HpChoice<ActivityLevel>(
-                value: level,
-                label: level.label,
-                detail: level.detail,
-              ),
-          ],
+        child: profileActivityChoices(
           selected: profile.activityLevel,
           onChanged: (ActivityLevel value) => _wizard
               .update((HealthProfile c) => c.copyWith(activityLevel: value)),
@@ -651,33 +520,17 @@ class _HealthProfileScreenState extends ConsumerState<HealthProfileScreen> {
         label: 'City',
         optional: true,
         helper: 'For seasonal produce and what is easy to buy near you.',
-        child: TextFormField(
-          controller: _city,
-          textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(hintText: 'Hyderabad'),
-        ),
+        child: profileCityField(controller: _city),
       ),
       HpField(
         label: 'PIN code',
         optional: true,
-        child: TextFormField(
-          controller: _pincode,
-          keyboardType: TextInputType.number,
-          inputFormatters: <TextInputFormatter>[
-            FilteringTextInputFormatter.digitsOnly,
-            LengthLimitingTextInputFormatter(6),
-          ],
-          decoration: const InputDecoration(hintText: '500081'),
-        ),
+        child: profilePincodeField(controller: _pincode),
       ),
       HpField(
         label: 'What would you like to work on?',
         helper: 'Pick up to three. You can change these whenever you like.',
-        child: HpMultiChoiceGroup<GoalType>(
-          choices: <HpChoice<GoalType>>[
-            for (final GoalType goal in GoalType.values)
-              HpChoice<GoalType>(value: goal, label: goal.label),
-          ],
+        child: profileGoalChoices(
           selected: profile.goalTypes.toSet(),
           onToggled: _wizard.toggleGoal,
         ),
