@@ -102,7 +102,11 @@ void main() {
   testWidgets('a second tap while the first is in flight is ignored',
       (WidgetTester tester) async {
     useTallSurface(tester);
-    final RefusingRepository repository = RefusingRepository();
+    // The call is held open rather than left to settle on its own. Awaiting a
+    // tap flushes microtasks, so a fake that settles immediately would have
+    // finished - and navigated - before the second tap, and the test would be
+    // proving something else entirely.
+    final RefusingRepository repository = RefusingRepository(hangConsent: true);
 
     await tester.pumpWidget(
       onboardingApp(repository: repository, router: onboardingRouter()),
@@ -111,11 +115,29 @@ void main() {
 
     await agreeToBoth(tester);
     await tester.tap(find.text('Agree and continue'));
-    // No pump between the taps: the first call has not resolved yet.
+
+    // Genuinely mid-flight: one call started, nothing has come back.
+    expect(repository.consentCalls, 1);
+
+    // The second tap, with no pump before it, so it reaches the handler's own
+    // guard rather than being turned away by the button's busy state - a frame
+    // would rebuild the button as busy and stop the tap a layer too early.
     await tester.tap(find.text('Agree and continue'));
+    expect(repository.consentCalls, 1,
+        reason: 'the second tap posted the consent a second time');
+
+    // Now let a frame through: still here, still busy, still one call.
+    await tester.pump();
+    expect(consentIsBusy(), isTrue);
+    expect(find.byType(ConsentScreen), findsOneWidget);
+
+    // And the held call still finishes properly once it is let go.
+    repository.releaseConsent();
     await tester.pumpAndSettle();
 
     expect(repository.consentCalls, 1);
+    expect(find.byType(HealthProfileScreen), findsOneWidget);
+    expect(find.byType(ConsentScreen), findsNothing);
   });
 
   testWidgets('says the free host is waking, and roughly how long',

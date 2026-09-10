@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:healthpulse/data/api/api_failure.dart';
 import 'package:healthpulse/data/models/models.dart';
 import 'package:healthpulse/data/repository/fake_health_repository.dart';
@@ -13,6 +15,7 @@ class RefusingRepository extends FakeHealthRepository {
   RefusingRepository({
     this.failure = const ApiFailure(ApiFailureKind.wakingUpTimedOut),
     this.refuseConsent = false,
+    this.hangConsent = false,
     this.refuseProfile = false,
     this.refuseSend = false,
     this.refuseSignIn = false,
@@ -23,6 +26,15 @@ class RefusingRepository extends FakeHealthRepository {
   final ApiFailure failure;
 
   final bool refuseConsent;
+
+  /// Hold `recordConsent` open until [releaseConsent] is called.
+  ///
+  /// Without this a test cannot tap twice "while the first call is in flight":
+  /// the fake settles in a microtask, and microtasks flush between two awaited
+  /// taps, so the second tap would land on a call that had already finished and
+  /// navigated. Holding the call open is the only way to put a second tap
+  /// inside the window the busy guard exists for.
+  final bool hangConsent;
   final bool refuseProfile;
   final bool refuseSend;
   final bool refuseSignIn;
@@ -33,6 +45,15 @@ class RefusingRepository extends FakeHealthRepository {
 
   /// How many times the profile was actually saved.
   int profileSaves = 0;
+
+  final Completer<void> _consentGate = Completer<void>();
+
+  /// Let a held `recordConsent` finish. Only meaningful with [hangConsent].
+  void releaseConsent() {
+    if (!_consentGate.isCompleted) {
+      _consentGate.complete();
+    }
+  }
 
   Never _refuse() => throw ApiRepositoryException(failure);
 
@@ -51,10 +72,13 @@ class RefusingRepository extends FakeHealthRepository {
   Future<ConsentRecord> recordConsent(
     ConsentType type, {
     required String version,
-  }) {
+  }) async {
     consentCalls += 1;
     if (refuseConsent) {
       _refuse();
+    }
+    if (hangConsent) {
+      await _consentGate.future;
     }
     return super.recordConsent(type, version: version);
   }
