@@ -28,6 +28,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final ScrollController _scroll = ScrollController();
   bool _sending = false;
 
+  /// Why the last send did not go, or null. Kept on screen rather than shown in
+  /// a snack bar: a message that failed to send is worth more than four
+  /// seconds of somebody's attention, and it sits next to the box holding the
+  /// words that need re-sending.
+  String? _sendError;
+
   @override
   void dispose() {
     _input.dispose();
@@ -46,9 +52,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     if (text.isEmpty || _sending) {
       return;
     }
-    // Captured before the await so nothing has to reach for `context` after it.
-    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
-    setState(() => _sending = true);
+    setState(() {
+      _sending = true;
+      _sendError = null;
+    });
     _input.clear();
 
     String? failure;
@@ -63,7 +70,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       );
     } finally {
       if (mounted) {
-        setState(() => _sending = false);
+        setState(() {
+          _sending = false;
+          _sendError = failure;
+        });
       }
     }
 
@@ -74,7 +84,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     // connection is not acceptable.
     _input.text = text;
     _input.selection = TextSelection.collapsed(offset: text.length);
-    messenger.showSnackBar(SnackBar(content: Text(failure)));
   }
 
   @override
@@ -82,6 +91,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final HpPalette p = context.hp;
     final AsyncValue<List<ChatMessage>> messages =
         ref.watch(messagesProvider);
+    final String? sendError = _sendError;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Chat')),
@@ -139,39 +149,63 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 color: p.surface,
                 border: Border(top: BorderSide(color: p.hairline)),
               ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
-                  IconButton(
-                    icon: const Icon(Icons.attach_file_rounded),
-                    tooltip: 'Attach a report or a photo',
-                    onPressed: () {},
-                  ),
-                  Expanded(
-                    child: TextField(
-                      controller: _input,
-                      minLines: 1,
-                      maxLines: 5,
-                      textCapitalization: TextCapitalization.sentences,
-                      decoration: const InputDecoration(
-                        hintText: 'Ask something, or say what you ate',
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        filled: false,
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: HpSpacing.sm,
-                          vertical: HpSpacing.md,
+                  if (sendError != null) ...<Widget>[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        HpSpacing.sm,
+                        HpSpacing.sm,
+                        HpSpacing.sm,
+                        0,
+                      ),
+                      child: Semantics(
+                        liveRegion: true,
+                        container: true,
+                        child: Text(
+                          sendError,
+                          style: HpType.label.copyWith(color: p.urgentInk),
                         ),
                       ),
-                      onSubmitted: (String _) => _send(),
                     ),
-                  ),
-                  const SizedBox(width: HpSpacing.xs),
-                  IconButton.filled(
-                    icon: const Icon(Icons.send_rounded),
-                    tooltip: 'Send',
-                    onPressed: _sending ? null : _send,
+                  ],
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: <Widget>[
+                      IconButton(
+                        icon: const Icon(Icons.attach_file_rounded),
+                        tooltip: 'Attach a report or a photo',
+                        onPressed: () {},
+                      ),
+                      Expanded(
+                        child: TextField(
+                          controller: _input,
+                          minLines: 1,
+                          maxLines: 5,
+                          textCapitalization: TextCapitalization.sentences,
+                          decoration: const InputDecoration(
+                            hintText: 'Ask something, or say what you ate',
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            filled: false,
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: HpSpacing.sm,
+                              vertical: HpSpacing.md,
+                            ),
+                          ),
+                          onSubmitted: (String _) => _send(),
+                        ),
+                      ),
+                      const SizedBox(width: HpSpacing.xs),
+                      IconButton.filled(
+                        icon: const Icon(Icons.send_rounded),
+                        tooltip: 'Send',
+                        onPressed: _sending ? null : _send,
+                      ),
+                    ],
                   ),
                 ],
               ),
