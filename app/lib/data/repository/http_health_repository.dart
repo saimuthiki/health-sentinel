@@ -241,7 +241,10 @@ class HttpHealthRepository implements HealthRepository, CacheAware {
           await _api.getMap('/v1/me/profile');
       final HealthProfile profile =
           Wire.profileFrom(profileJson, userId: asString(me['user_id']));
-      final Map<String, dynamic> planJson = await _api.getMap('/v1/plan/today');
+      // generates: true -- reading today's plan builds it when there is not one
+      // yet, which is a model call, not a row read.
+      final Map<String, dynamic> planJson =
+          await _api.getMap('/v1/plan/today', generates: true);
       final MealPlan plan =
           Wire.planFrom(planJson, mealTimes: profile.mealTimes);
 

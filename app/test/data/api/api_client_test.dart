@@ -44,6 +44,7 @@ ApiClient buildClient(
   Duration cold = const Duration(milliseconds: 400),
   Duration notice = const Duration(milliseconds: 20),
   Duration warmFor = const Duration(minutes: 10),
+  Duration generation = const Duration(milliseconds: 1500),
 }) {
   return ApiClient(
     baseUrl: Uri.parse('https://healthpulse.test'),
@@ -52,6 +53,7 @@ ApiClient buildClient(
     warmTimeout: warm,
     coldTimeout: cold,
     uploadTimeout: const Duration(seconds: 5),
+    generationTimeout: generation,
     wakeNoticeAfter: notice,
     staysWarmFor: warmFor,
   );
@@ -498,5 +500,50 @@ void main() {
     expect(client.callCount, 0);
     expect(api.phase, ApiPhase.idle);
     api.close();
+  });
+
+  group('requests that run a model get longer than requests that read a row', () {
+    // Reading today's plan builds it when none exists: a Gemini call, the safety
+    // pass, and a regeneration if that pass rejects the answer. At the
+    // twenty-second read timeout that reached the phone as "The health engine did
+    // not answer in time" on the very first open of the app.
+    //
+    // Both cases below use the SAME slow responder. The only difference is
+    // `generates:`, so the timeout is the only thing under test.
+    FakeHttpClient slowClient() => FakeHttpClient(
+          (http.BaseRequest request, int attempt) async {
+            if (request.url.path == '/healthz') {
+              return jsonResponse(200, <String, dynamic>{'status': 'ok'});
+            }
+            await Future<void>.delayed(const Duration(milliseconds: 250));
+            return jsonResponse(200, <String, dynamic>{'ok': true});
+          },
+        );
+
+    test('a generating GET survives work that outlasts the read timeout', () async {
+      final ApiClient api = buildClient(
+        slowClient(),
+        warm: const Duration(milliseconds: 60),
+        generation: const Duration(milliseconds: 2000),
+      );
+      final Map<String, dynamic> body =
+          await api.getMap('/v1/plan/today', generates: true);
+      expect(body['ok'], isTrue);
+      api.close();
+    });
+
+    test('the same request without it times out, which is what happened', () async {
+      final ApiClient api = buildClient(
+        slowClient(),
+        warm: const Duration(milliseconds: 60),
+        generation: const Duration(milliseconds: 2000),
+      );
+      await expectLater(
+        api.getMap('/v1/plan/today'),
+        throwsA(isA<ApiFailure>()
+            .having((ApiFailure f) => f.kind, 'kind', ApiFailureKind.timeout)),
+      );
+      api.close();
+    });
   });
 }

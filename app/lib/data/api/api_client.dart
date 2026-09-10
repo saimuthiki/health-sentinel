@@ -44,6 +44,7 @@ class ApiClient {
     this.warmTimeout = const Duration(seconds: 20),
     this.coldTimeout = const Duration(seconds: 60),
     this.uploadTimeout = const Duration(seconds: 120),
+    this.generationTimeout = const Duration(seconds: 90),
     this.wakeNoticeAfter = const Duration(seconds: 2),
     this.staysWarmFor = const Duration(minutes: 10),
     DateTime Function()? clock,
@@ -68,6 +69,15 @@ class ApiClient {
 
   /// Uploads carry up to twenty megabytes over a phone connection.
   final Duration uploadTimeout;
+
+  /// For requests that run a model rather than read a row.
+  ///
+  /// GET /v1/plan/today generates the day's plan on first read: a Gemini call
+  /// over the whole profile, then the safety pass, and a regeneration if that
+  /// pass rejects the first answer. That is ordinary work measured in tens of
+  /// seconds, and the twenty-second [warmTimeout] written for reading a row
+  /// turned it into "The health engine did not answer in time" every time.
+  final Duration generationTimeout;
 
   /// How long a wake-up has to be taking before the interface mentions it. A
   /// backend that was only briefly idle answers in a second and says nothing.
@@ -101,9 +111,12 @@ class ApiClient {
   Future<Map<String, dynamic>> getMap(
     String path, {
     Map<String, String>? query,
+    /// Set for a request that runs a model. Defaults to reading-a-row speed.
+    bool generates = false,
   }) async {
     return _asMap(await _json(() => http.Request('GET', _uri(path, query)),
-        timeout: warmTimeout, retryWhenCold: true));
+        timeout: generates ? generationTimeout : warmTimeout,
+        retryWhenCold: true));
   }
 
   Future<List<dynamic>> getList(
