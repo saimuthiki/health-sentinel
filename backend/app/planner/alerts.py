@@ -16,6 +16,7 @@ from datetime import date, time, timedelta
 
 from app.domain.enums import AlertType, MealSlot
 from app.domain.models import DayPlan, HealthProfile, ScheduledAlert
+from app.planner.weekly_summary_alert import weekly_summary_alert
 from app.rules.daily_goals import (
     HYDRATION_CAUTION_ABOVE_ML,
     HydrationTarget,
@@ -176,6 +177,14 @@ def derive_alerts(
                 at=GROCERY_TIME,
             )
         )
+    # The weekly summary belongs here and nowhere else. AlertRepository.replace
+    # rewrites the derived set, so a summary alert inserted from any other place
+    # would be deleted by the next plan generation -- and this is also what makes
+    # the WEEKLY_SUMMARY switch on the reminders screen govern something that can
+    # actually arrive.
+    summary = weekly_summary_alert(profile, on=on)
+    if summary is not None:
+        alerts.append(summary)
     return alerts
 
 

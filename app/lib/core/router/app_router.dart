@@ -13,12 +13,14 @@ import '../../features/plan/plan_screen.dart';
 import '../../features/profile/health_profile_screen.dart';
 import '../../features/profile/profile_routing.dart';
 import '../../features/profile/profile_summary_screen.dart';
+import '../../features/recipes/recipe_screen.dart';
 import '../../features/reminders/reminders_screen.dart';
 import '../../features/reports/report_detail_screen.dart';
 import '../../features/reports/reports_screen.dart';
 import '../../features/setup/not_configured_screen.dart';
 import '../../features/shell/home_shell.dart';
 import '../../features/splash/splash_screen.dart';
+import '../../features/summary/weekly_summary_screen.dart';
 import '../../features/today/today_screen.dart';
 
 /// The app's routes.
@@ -61,6 +63,20 @@ GoRouter buildAppRouter() {
         path: '/sign-up',
         builder: (BuildContext context, GoRouterState state) =>
             const SignUpScreen(),
+      ),
+      GoRoute(
+        // How to make one meal of a plan, and how much of it to have. The item
+        // is in the path and the plan's date is a query parameter, so the link
+        // survives a rotation and can be pasted into a bug report. Neither
+        // carries a quantity: the portion is read off the stored plan row on
+        // the server, which is the row its nutrition was computed from.
+        path: '/recipe/:itemId',
+        builder: (BuildContext context, GoRouterState state) => RecipeScreen(
+          itemId: state.pathParameters['itemId'] ?? '',
+          planDate:
+              DateTime.tryParse(state.uri.queryParameters[recipeDateParam] ?? '')
+                  ?? DateTime.now(),
+        ),
       ),
       GoRoute(
         // `?blocked=1` means the app arrived here from a refusal rather than
@@ -178,6 +194,14 @@ GoRouter buildAppRouter() {
                     builder: (BuildContext context, GoRouterState state) =>
                         const GroceryScreen(),
                   ),
+                  GoRoute(
+                    // The week just gone. A child of More for the same reason
+                    // the grocery list is one: this is a screen reached from a
+                    // tile on that list, and its back control lands there.
+                    path: 'week',
+                    builder: (BuildContext context, GoRouterState state) =>
+                        const WeeklySummaryScreen(),
+                  ),
                 ],
               ),
             ],
@@ -187,3 +211,11 @@ GoRouter buildAppRouter() {
     ],
   );
 }
+
+/// The query parameter carrying the plan's date into `/recipe/:itemId`.
+///
+/// Named here, beside the route that reads it, for the same reason
+/// `consentBlockedParam` and `profileReturnParam` are: a bare string literal
+/// spelled two different ways in two files is a link that silently loses its
+/// date and quietly shows the wrong day's portion.
+const String recipeDateParam = 'on';

@@ -240,6 +240,17 @@ final messagesProvider = FutureProvider.autoDispose<List<ChatMessage>>((ref) {
   return ref.watch(healthRepositoryProvider).loadMessages();
 });
 
+/// Every food this app has formed a belief about — the tastes screen's list.
+///
+/// `autoDispose` like the rest, so the list is re-read on arrival rather than
+/// held from a visit two screens ago. It changes whenever a meal is rated
+/// anywhere else in the app, and a stale answer here is a person looking at a
+/// belief we no longer hold.
+final foodPreferencesProvider =
+    FutureProvider.autoDispose<List<FoodPreference>>((ref) {
+  return ref.watch(healthRepositoryProvider).loadFoodPreferences();
+});
+
 /// The health profile being filled in, held across the steps of the wizard.
 class ProfileWizardController extends Notifier<HealthProfile> {
   @override

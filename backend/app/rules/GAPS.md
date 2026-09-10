@@ -430,3 +430,74 @@ more importantly — the 6000 mL ceiling, which is a construction of ours from a
 hourly rate and not a published daily limit. Also worth deciding: whether a profile that
 records daily hard training in a hot climate should warn *earlier* than 3000 mL rather
 than later, since that is the population in which the harm is documented.
+
+---
+
+### G21 — The weekly summary counts taps, not eating, and cannot count water at all
+`app/rules/weekly_rollup.py` → `roll_up()`, `factual_lines()`
+
+The weekly summary is built entirely from counts this service can prove from its own
+rows. Three of those counts are further from the thing a reader will assume they mean
+than we would like, and the copy hedges each one rather than pretending otherwise.
+
+- **"Marked eaten" is a tap, not a meal.** `plan_item_progress` records that somebody
+  pressed a button on a plan item. Whether the food was eaten, how much of it, and
+  whether it was eaten that day are all unrecorded. The sentences therefore say *marked*,
+  never *ate*, and the day attributed to a mark is the day of the tap (`occurred_at`),
+  because the payload carries no date of its own. Somebody who catches up on Sunday
+  evening will see one active day, not five, and that is the honest reading of what we
+  hold.
+- **Water is not counted at all.** There is no endpoint to log a glass of water against:
+  `logHydration` in `app/lib/data/repository/http_health_repository.dart` writes to the
+  phone's own offline cache and nothing sends it anywhere. The only hydration figure the
+  backend holds is what a *plan asked for*, which is not what anybody drank. The summary
+  says so in `NOT_MEASURED` rather than quietly reporting the plan's figure as intake.
+  **Needed to close this:** a `POST /v1/feedback/hydration` writing to `health_events`
+  the way movement already does, after which `roll_up()` gains a fourth fold and one more
+  sentence. Until then any "you drank more this week" line is a fabrication and is
+  forbidden by `app/rules/summary_prose_rails.py`.
+- **A quiet week is defined by two constants nobody has validated.**
+  `MIN_SIGNALS_FOR_PROSE = 2` and `MIN_ACTIVE_DAYS_FOR_PROSE = 2` are the point below
+  which the summary refuses to say anything encouraging. They are a judgement about
+  honesty, not about health, and they are deliberately generous towards silence: an empty
+  week reported as empty is what makes a full week's sentence believable. Worth revisiting
+  once there is real usage, because a threshold that is too high tells a person who is
+  genuinely starting out that they did nothing.
+
+**Needed:** nothing clinical. This item is here so that whoever reads a summary knows
+exactly which claim each number can carry, and so that the hydration gap is closed
+deliberately rather than by somebody wiring the plan's figure into it.
+
+---
+
+### G22 — A recipe is a method with no amounts in it, and the plan's arithmetic is why
+`app/rules/recipe_text_rails.py` → `check_recipe_text()`
+
+A plan item is one food from the `foods` table at a weight in grams, and its nutrition is
+recomputed from that single row. A generated method that says "two tablespoons of ghee"
+has silently changed the meal, and the Plan tab's numbers would then be describing a dish
+nobody is going to cook. The planner never populates `recipe_id`
+(`app/planner/service.py` → `parse_plan_items`), so there is no `recipe_items` row to
+recompute from, and asking a model for ingredient weights would put nutrient numbers back
+into model output.
+
+So generated recipes carry **no unit of mass or volume at all** — no grams, no
+millilitres, no cups, no spoons — and the only quantity on the recipe screen is the plan
+item's own `grams`, printed in Python from the stored row. The rail is mechanical and
+tested; the honest description of the result is that HealthPulse gives you a *method*, and
+the amounts stay the plan's.
+
+Two known costs of that choice, recorded rather than hidden:
+
+- **The method is less useful than a real recipe.** "Enough water to cover" is a real
+  instruction; "one and a half cups" is a better one. A cook who wants exact amounts has
+  to bring their own.
+- **Aromatics, oil and salt are outside the plan's numbers whatever we do.** Nobody eats
+  rajma without oil, and the plan's energy figure for the item does not include any. The
+  recipe screen does not pretend otherwise, but neither does it correct for it.
+
+**Needed:** if the owner ever wants amounts in a recipe, the honest way to get them is a
+curated `recipes` + `recipe_items` seed — real ingredient rows joined to `foods`, from
+which `recompute_plan_items()` can compute nutrition the same way it does for a single
+food. That is a data problem, not a prompting problem, and it is already noted as item 6
+in `db/seed/GAPS.md`. Generating the amounts would not close it.

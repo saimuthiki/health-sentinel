@@ -502,6 +502,86 @@ class HttpHealthRepository implements HealthRepository, CacheAware {
     }
   }
 
+  // ---------------------------------------------------------------- tastes
+
+  @override
+  Future<String> logMeal({
+    MealSlot? mealSlot,
+    String? foodId,
+    String? freeText,
+    String source = 'manual',
+  }) async {
+    try {
+      final Map<String, dynamic> json = await _api.postMap(
+        '/v1/feedback/meals',
+        body: Wire.logMealBody(
+          mealSlot: mealSlot,
+          foodId: foodId,
+          freeText: freeText,
+          source: source,
+        ),
+      );
+      return asString(json['id']);
+    } on ApiFailure catch (failure) {
+      throw _wrap(failure);
+    }
+  }
+
+  /// A POST, and one that is never replayed on a timeout — see [ApiClient].
+  ///
+  /// That is the right trade here even though the write itself is idempotent:
+  /// the rating replaces, but this call is only ever made against a food log
+  /// this session created, and a silent replay of a call whose reply is what
+  /// the screen says out loud is not worth the second sentence it could
+  /// produce. A person who wants to try again taps again.
+  @override
+  Future<MealRating> rateMeal({
+    required String foodLogId,
+    required int rating,
+  }) async {
+    try {
+      final Map<String, dynamic> json = await _api.postMap(
+        '/v1/feedback/meals/${Uri.encodeComponent(foodLogId)}/rating',
+        body: <String, dynamic>{'rating': rating},
+      );
+      return Wire.ratingFrom(json);
+    } on ApiFailure catch (failure) {
+      throw _wrap(failure);
+    }
+  }
+
+  @override
+  Future<List<FoodPreference>> loadFoodPreferences() async {
+    try {
+      final Map<String, dynamic> json =
+          await _api.getMap('/v1/feedback/preferences');
+      return Wire.preferencesFrom(json);
+    } on ApiFailure catch (failure) {
+      throw _wrap(failure);
+    }
+  }
+
+  /// A PUT, so the client is allowed to replay it after a dropped connection:
+  /// sending the same stance twice leaves exactly the same row.
+  @override
+  Future<FoodPreference> setFoodPreference({
+    required String foodId,
+    required TasteStance stance,
+  }) async {
+    try {
+      final Map<String, dynamic> json = await _api.putMap(
+        '/v1/feedback/preferences/${Uri.encodeComponent(foodId)}',
+        // The rating, not the stance. The backend owns where the boundaries
+        // between liked, neutral and disliked sit, and sending a stance would
+        // put a second copy of that judgement on the phone.
+        body: <String, dynamic>{'rating': stance.rating},
+      );
+      return Wire.preferenceFrom(json);
+    } on ApiFailure catch (failure) {
+      throw _wrap(failure);
+    }
+  }
+
   // --------------------------------------------------------------- grocery
 
   /// `GET /v1/grocery` — the current week, as the backend decides which week

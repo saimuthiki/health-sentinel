@@ -468,6 +468,51 @@ class Wire {
         createdAt: DateTime.now(),
       );
 
+  // --------------------------------------------------------------- tastes
+
+  /// `PreferencesOut` — the whole list, already sorted by name server-side.
+  ///
+  /// The order is not re-derived here. The backend sorts it so the list stays
+  /// put between two visits, and a second sort on the phone would be a second
+  /// opinion about something that already has one.
+  static List<FoodPreference> preferencesFrom(Map<String, dynamic> json) =>
+      asMapList(json['preferences']).map(FoodPreference.fromJson).toList();
+
+  /// `PreferenceOut` — one row, after a correction.
+  static FoodPreference preferenceFrom(Map<String, dynamic> json) =>
+      FoodPreference.fromJson(json);
+
+  /// `RatingOut` — what one rating did, including when it did nothing.
+  static MealRating ratingFrom(Map<String, dynamic> json) =>
+      MealRating.fromJson(json);
+
+  /// The body `LogMealIn` accepts, with nothing in it the model forbids.
+  ///
+  /// `LogMealIn` is declared `extra="forbid"`, so a key it does not know is a
+  /// 422 rather than something quietly dropped — which is why this is built
+  /// here from named arguments instead of a map passed down from a screen.
+  /// [mealSlotOut] returns null for the app's early-morning slot, which the
+  /// backend has no name for; the key is left out rather than guessed at.
+  static Map<String, dynamic> logMealBody({
+    MealSlot? mealSlot,
+    String? foodId,
+    String? freeText,
+    String source = 'manual',
+  }) {
+    final String? slot = mealSlot == null ? null : mealSlotOut(mealSlot);
+    final String? text = freeText == null ? null : _nonEmpty(freeText);
+    return prune(<String, dynamic>{
+      'meal_slot': slot,
+      'food_id': foodId,
+      // `free_text` is capped at 280 characters server-side. A plan item title
+      // is nowhere near that, but a trim here is cheaper than a 422 there.
+      'free_text': text == null || text.length <= 280
+          ? text
+          : text.substring(0, 280),
+      'source': source,
+    });
+  }
+
   // --------------------------------------------------------------- alerts
 
   static AlertPlan alertsFrom(Map<String, dynamic> json) =>

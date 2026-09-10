@@ -30,7 +30,9 @@ from app.api import (
     health,
     plan,
     privacy,
+    recipes,
     reports,
+    summary,
 )
 from app.core.config import ConfigurationError, Settings, get_settings, validate_settings
 from app.core.errors import (
@@ -103,6 +105,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(grocery.router)
     app.include_router(alerts.router)
     app.include_router(privacy.router)
+    app.include_router(summary.router)
+    app.include_router(recipes.router)
     return app
 
 

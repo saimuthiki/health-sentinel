@@ -272,6 +272,42 @@ class _SlotSectionState extends ConsumerState<_SlotSection> {
   /// The last refusal, in our own words.
   String? _error;
 
+  /// The taste answer that landed for each option, by plan item id.
+  ///
+  /// Like [_chosenId] this is what actually came back, never what was tapped:
+  /// nothing on this card claims an opinion was recorded until the call that
+  /// recorded it has returned.
+  final Map<String, TasteStance> _tastes = <String, TasteStance>{};
+
+  /// What to say underneath, by plan item id.
+  ///
+  /// Held rather than derived because the two possible sentences are decided by
+  /// the *reply* — whether a preference actually moved — and not by the button
+  /// that was pressed. An item with no food behind it gets the honest one.
+  final Map<String, String> _tasteNotes = <String, String>{};
+
+  /// The food log each option was written down as, by plan item id.
+  ///
+  /// This is the reason changing your mind about a taste does not corrupt the
+  /// day. `app/planner/context.py` sums `food_logs` to work out what has already
+  /// been eaten, so logging the same plate again to attach a second opinion
+  /// would double-count its nutrients and pull the gap report — and tomorrow's
+  /// plan — out of shape. The meal is written down once, on the first answer,
+  /// and every later answer re-rates that same entry.
+  final Map<String, String> _mealLogIds = <String, String>{};
+
+  /// Which taste button is waiting, or null when the busy card is marking a
+  /// meal eaten instead. It decides which control shows the spinner; the guard
+  /// itself is [_busyItemId], which both actions share.
+  TasteStance? _busyStance;
+
+  /// What an option with no `food_id` says. Not "thanks, noted": the food is not
+  /// in the table the planner selects from, so nothing we suggest will change,
+  /// and implying otherwise is a promise we cannot keep.
+  static const String _notInOurList =
+      'This one is not in our food list yet, so it will not change what we '
+      'suggest.';
+
   /// Say what was eaten and, when the answer changes, unsay the last one.
   ///
   /// Three things happen here and each is deliberate.
@@ -348,6 +384,80 @@ class _SlotSectionState extends ConsumerState<_SlotSection> {
     }
   }
 
+  /// Record what one option tasted like.
+  ///
+  /// The meal is written down the first time an answer is given and re-rated
+  /// every time after that, so three changes of mind leave one entry in the food
+  /// diary with the latest opinion on it — not three portions of the same plate.
+  /// The log id is remembered as soon as the write returns, so a rating that
+  /// then fails still leaves nothing to log twice on the retry.
+  ///
+  /// It shares [_busyItemId] with [_choose] rather than keeping a guard of its
+  /// own. That is deliberate: the taste question only exists because the
+  /// mark-eaten call succeeded, and a taste tap racing a correction of that
+  /// same call is exactly the ordering nobody could reason about afterwards.
+  ///
+  /// What it says afterwards is decided by the reply. A plan item with no
+  /// `food_id` is logged and rated like any other, and the backend answers
+  /// `preference_updated: false` — so the card says the food is not in our list
+  /// rather than claiming it learned something.
+  Future<void> _rate(MealPlanItem item, TasteStance stance) async {
+    if (_busyItemId != null) {
+      return;
+    }
+    setState(() {
+      _busyItemId = item.id;
+      _busyStance = stance;
+      _error = null;
+    });
+
+    TasteStance? landed;
+    String? note;
+    String? failure;
+    try {
+      final HealthRepository repository = ref.read(healthRepositoryProvider);
+      String? logId = _mealLogIds[item.id];
+      if (logId == null) {
+        logId = await repository.logMeal(
+          mealSlot: item.mealSlot,
+          foodId: item.foodId,
+          // So the entry is readable in a diary even when the food is not one
+          // we hold a row for.
+          freeText: item.title,
+          source: 'planned',
+        );
+        _mealLogIds[item.id] = logId;
+      }
+      final MealRating result = await repository.rateMeal(
+        foodLogId: logId,
+        rating: stance.rating,
+      );
+      landed = stance;
+      note = result.preferenceUpdated
+          // The stance the server settled on, not the one that was tapped.
+          ? (result.stance ?? stance).effect
+          : _notInOurList;
+    } catch (error) {
+      failure = explainFailure(
+        error,
+        fallback: 'That could not be saved just now. Nothing was lost — try '
+            'again in a moment.',
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busyItemId = null;
+          _busyStance = null;
+          _error = failure;
+          if (landed != null && note != null) {
+            _tastes[item.id] = landed;
+            _tasteNotes[item.id] = note;
+          }
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final HpPalette p = context.hp;
@@ -402,10 +512,20 @@ class _SlotSectionState extends ConsumerState<_SlotSection> {
                   : chosenId == items[i].id
                       ? _OptionState.chosen
                       : _OptionState.passedOver,
-              busy: _busyItemId == items[i].id,
+              // The main button spins only for its own call. A taste tap puts
+              // the spinner on the chip that was pressed instead, so it is
+              // always clear which question is being answered.
+              busy: _busyItemId == items[i].id && _busyStance == null,
               // Every button in the meal goes quiet while any one of them is
               // working, which is what stops a second tap posting twice.
               onPressed: _busyItemId == null ? () => _choose(items[i]) : null,
+              taste: _tastes[items[i].id],
+              tasteNote: _tasteNotes[items[i].id],
+              busyStance:
+                  _busyItemId == items[i].id ? _busyStance : null,
+              onTaste: _busyItemId == null
+                  ? (TasteStance stance) => _rate(items[i], stance)
+                  : null,
             ),
           ],
           if (error != null) ...<Widget>[
@@ -432,16 +552,32 @@ class _MealOption extends StatelessWidget {
     required this.state,
     required this.busy,
     required this.onPressed,
+    this.taste,
+    this.tasteNote,
+    this.busyStance,
+    this.onTaste,
   });
 
   final MealPlanItem item;
   final _OptionState state;
 
-  /// This option's own call is in flight.
+  /// This option's own mark-eaten call is in flight.
   final bool busy;
 
   /// Null while the meal is busy, which is how the button disables itself.
   final VoidCallback? onPressed;
+
+  /// The taste answer that landed, or null while none has.
+  final TasteStance? taste;
+
+  /// What the last answer did, in one sentence. Comes from the reply.
+  final String? tasteNote;
+
+  /// The taste chip waiting on its call, or null.
+  final TasteStance? busyStance;
+
+  /// Null while the meal is busy, which is how the chips disable themselves.
+  final void Function(TasteStance stance)? onTaste;
 
   @override
   Widget build(BuildContext context) {
@@ -526,6 +662,23 @@ class _MealOption extends StatelessWidget {
               ],
             ),
           ],
+          // Asked here, on the thing it is about, and only once "You ate this"
+          // is true. Not a dialog: a dialog would cover the other options at
+          // the moment somebody is most likely to realise they picked the wrong
+          // one, and it would have to be dismissed before it could be ignored.
+          // An answer is optional, and saying nothing is a perfectly good
+          // answer — so this sits under the confirmation rather than in the way
+          // of it.
+          if (chosen) ...<Widget>[
+            const SizedBox(height: HpSpacing.md),
+            _TasteQuestion(
+              itemId: item.id,
+              chosen: taste,
+              note: tasteNote,
+              busyStance: busyStance,
+              onTaste: onTaste,
+            ),
+          ],
           const SizedBox(height: HpSpacing.lg),
           // There is no "Swap" button any more, and its absence is the point.
           // Nothing in the API can swap one item: the only thing on offer is
@@ -541,6 +694,156 @@ class _MealOption extends StatelessWidget {
             onPressed: onPressed,
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// *Did you enjoy it?* — three answers, on the thing they are about.
+///
+/// The owner asked for exactly this and for it to count next time, so the
+/// question is asked where the answer is obvious and nowhere else: inside the
+/// card for the option he just said he ate.
+///
+/// Two rules run through the copy. **Only plan claims.** Every sentence this can
+/// show is about what we will suggest, which is a thing this app controls and
+/// can be held to. None of them is about what a food does to a person, which is
+/// not. And **nothing is claimed until it landed** — the chip fills in and the
+/// sentence appears from the reply, never from the tap.
+class _TasteQuestion extends StatelessWidget {
+  const _TasteQuestion({
+    required this.itemId,
+    required this.chosen,
+    required this.note,
+    required this.busyStance,
+    required this.onTaste,
+  });
+
+  final String itemId;
+  final TasteStance? chosen;
+  final String? note;
+  final TasteStance? busyStance;
+  final void Function(TasteStance stance)? onTaste;
+
+  @override
+  Widget build(BuildContext context) {
+    final HpPalette p = context.hp;
+    final String? sentence = note;
+
+    return Column(
+      key: ValueKey<String>('taste-question-$itemId'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          'Did you enjoy it?',
+          style: HpType.label.copyWith(color: p.inkMuted),
+        ),
+        const SizedBox(height: HpSpacing.sm),
+        // Wrap, not Row: "Did not like it" beside two others does not fit on a
+        // narrow phone, and three answers squeezed onto one line is how a
+        // person taps the wrong one.
+        Wrap(
+          spacing: HpSpacing.sm,
+          runSpacing: HpSpacing.sm,
+          children: <Widget>[
+            for (final TasteStance stance in TasteStance.values)
+              _TasteChip(
+                key: ValueKey<String>('taste-$itemId-${stance.name}'),
+                stance: stance,
+                selected: chosen == stance,
+                busy: busyStance == stance,
+                onPressed:
+                    onTaste == null ? null : () => onTaste!(stance),
+              ),
+          ],
+        ),
+        if (sentence != null) ...<Widget>[
+          const SizedBox(height: HpSpacing.sm),
+          Semantics(
+            liveRegion: true,
+            container: true,
+            child: Text(
+              sentence,
+              key: ValueKey<String>('taste-note-$itemId'),
+              style: HpType.micro.copyWith(color: p.inkFaint),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// One answer. Filled when it is the one that landed, outlined otherwise.
+///
+/// The selected state is carried by fill *and* by a tick, not by colour alone:
+/// the same reason the chosen option above uses a filled circle rather than a
+/// green tint. It is 48dp tall, which is the minimum target this app promises.
+class _TasteChip extends StatelessWidget {
+  const _TasteChip({
+    super.key,
+    required this.stance,
+    required this.selected,
+    required this.busy,
+    required this.onPressed,
+  });
+
+  final TasteStance stance;
+  final bool selected;
+  final bool busy;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final HpPalette p = context.hp;
+    final Color background = selected ? p.pineSoft : p.surface;
+    final Color edge = selected ? p.pine : p.hairline;
+    final Color label = selected ? p.pineDeep : p.ink;
+
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: Material(
+        color: background,
+        borderRadius: HpRadii.pillRadius,
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: busy ? null : onPressed,
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 48),
+            padding: const EdgeInsets.symmetric(
+              horizontal: HpSpacing.lg,
+              vertical: HpSpacing.sm,
+            ),
+            decoration: BoxDecoration(
+              borderRadius: HpRadii.pillRadius,
+              border: Border.all(color: edge),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                if (busy) ...<Widget>[
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(p.pineDeep),
+                    ),
+                  ),
+                  const SizedBox(width: HpSpacing.sm),
+                ] else if (selected) ...<Widget>[
+                  Icon(Icons.check_rounded, size: 16, color: p.pineDeep),
+                  const SizedBox(width: HpSpacing.sm),
+                ],
+                Text(
+                  stance.label,
+                  style: HpType.label.copyWith(color: label),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

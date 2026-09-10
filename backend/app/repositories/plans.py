@@ -160,14 +160,50 @@ class FoodLogRepository(UserScopedRepository):
         return str(food_id) if food_id else None
 
     async def rate(self, food_log_id: str, rating: int, note: str | None = None) -> dict[str, Any]:
+        """Record what one logged meal was worth, replacing any earlier answer.
+
+        An upsert rather than an insert, because ``uq_food_feedback_food_log``
+        (``db/migrations/006_nutrition.sql``) is UNIQUE on ``food_log_id``: a plain
+        insert made the *second* rating of the same meal a 23505, which surfaced as a
+        409 to somebody who had simply mistapped and wanted to correct it. A rating is
+        an opinion, and an opinion is allowed to change.
+
+        Logging the meal a second time to get a fresh row would not have been a fix. The
+        day's intake is summed straight off ``food_logs`` by
+        ``app.planner.context._intake_today``, so a duplicate row double-counts the
+        nutrients and quietly corrupts the gap report the whole plan is built from.
+
+        ``set_preference`` is already an upsert on ``(user_id, food_id)``, so the stance
+        the planner reads follows the corrected rating without anything else changing.
+        """
         row = {
             "user_id": self.user_id,
             "food_log_id": food_log_id,
             "rating": int(rating),
             "note": note,
         }
-        rows = await self.db.insert("food_feedback", row)
+        rows = await self.db.upsert("food_feedback", row, on_conflict="food_log_id")
         return rows[0] if rows else row
+
+    async def preference(self, food_id: str) -> FoodPreference | None:
+        """One stored preference, with the food's real name resolved.
+
+        Kept next to :meth:`preferences` so both read the same columns and resolve the
+        name the same way. Returns ``None`` when nothing is stored for that food, and
+        also when the food itself is not in the reference table -- a preference nobody
+        can put a name to is one the user could never recognise or correct.
+        """
+        row = await self.db.select_one(
+            "food_preferences",
+            columns="food_id,stance,score",
+            filters={**self._mine, "food_id": eq(food_id)},
+        )
+        if row is None:
+            return None
+        names = await self._food_names([food_id])
+        if food_id not in names:
+            return None
+        return self._preference_of(row, names)
 
     async def preferences(self) -> list[FoodPreference]:
         rows = await self.db.select(
@@ -178,23 +214,22 @@ class FoodLogRepository(UserScopedRepository):
         )
         food_ids = [str(r.get("food_id")) for r in rows if r.get("food_id")]
         names = await self._food_names(food_ids)
-        out: list[FoodPreference] = []
-        for row in rows:
-            food_id = str(row.get("food_id") or "")
-            stance_raw = str(row.get("stance") or "neutral")
-            try:
-                score = float(row.get("score") or 0.0)
-            except (TypeError, ValueError):
-                score = 0.0
-            out.append(
-                FoodPreference(
-                    food_id=food_id,
-                    name=names.get(food_id, food_id),
-                    stance=Stance(stance_raw) if stance_raw in set(Stance) else Stance.NEUTRAL,
-                    score=score,
-                )
-            )
-        return out
+        return [self._preference_of(row, names) for row in rows]
+
+    @staticmethod
+    def _preference_of(row: dict[str, Any], names: dict[str, str]) -> FoodPreference:
+        food_id = str(row.get("food_id") or "")
+        stance_raw = str(row.get("stance") or "neutral")
+        try:
+            score = float(row.get("score") or 0.0)
+        except (TypeError, ValueError):
+            score = 0.0
+        return FoodPreference(
+            food_id=food_id,
+            name=names.get(food_id, food_id),
+            stance=Stance(stance_raw) if stance_raw in set(Stance) else Stance.NEUTRAL,
+            score=score,
+        )
 
     async def _food_names(self, food_ids: list[str]) -> dict[str, str]:
         if not food_ids:

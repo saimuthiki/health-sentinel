@@ -6,4 +6,5 @@ export 'plan.dart';
 export 'profile.dart';
 export 'report.dart';
 export 'session.dart';
+export 'taste.dart';
 export 'today.dart';

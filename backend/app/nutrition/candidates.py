@@ -42,7 +42,10 @@ __all__ = [
 
 DEFAULT_LIMIT = 300
 
-#: A food the user rated below this, and marked as disliked, is not offered again.
+#: A food the user rated **at or below** this, and marked as disliked, is not offered
+#: again. At or below, because ``app.api.feedback.DISLIKE_AT`` calls exactly this score a
+#: dislike; a strict ``<`` here left a rating of 2 labelled a dislike in the prompt and
+#: still served on the plan.
 DISLIKE_SCORE_THRESHOLD = 2.0
 
 #: How much a strong "like" can lift a food up the ranking. Kept smaller than the gap
@@ -226,7 +229,13 @@ def filter_foods(
             if pref.stance is Stance.NEVER:
                 rejected.append(Rejection(food, "stance:never"))
                 continue
-            if pref.stance is Stance.DISLIKE and pref.score < dislike_threshold:
+            # ``<=``, not ``<``. ``app.api.feedback`` calls a score of exactly 2.0 a
+            # dislike, and this line used to keep offering it -- so a food rated 2 was
+            # named as a dislike in the model's prompt and put back on the plan anyway.
+            # The two boundaries now meet at the same number, and
+            # ``tests/nutrition/test_dislike_boundary_meets_feedback.py`` reads
+            # ``DISLIKE_AT`` off the API module so they cannot drift apart again.
+            if pref.stance is Stance.DISLIKE and pref.score <= dislike_threshold:
                 rejected.append(Rejection(food, "disliked"))
                 continue
         allowed.append(food)

@@ -31,8 +31,30 @@ Profiles = Annotated[ProfileRepository, Depends(get_profiles)]
 #: How far a single rating moves a food's score, on the 0-5 scale the planner reads.
 RATING_TO_SCORE: dict[int, float] = {1: 1.0, 2: 2.0, 3: 3.0, 4: 4.0, 5: 5.0}
 #: At or below this a food stops being offered; at or above it becomes a "like".
+#:
+#: ``DISLIKE_AT`` is the *same* number ``app.nutrition.candidates`` compares against, and
+#: both comparisons are now inclusive. They used to disagree by one boundary: a rating of
+#: 2 was written down as a dislike here and handed back to the person on tomorrow's plan,
+#: because the filter excluded on ``score < 2.0``. See
+#: ``tests/nutrition/test_dislike_boundary_meets_feedback.py``, which asserts the two
+#: modules agree rather than asserting a literal in each.
 DISLIKE_AT = 2.0
 LIKE_AT = 4.0
+
+
+def stance_for(score: float) -> Stance:
+    """The stance one score means. The only place this arithmetic is written.
+
+    Rating a meal and correcting a taste from the tastes screen are two doors into the
+    same store, so they share this function: a rating of 3 is neutral on both paths, and
+    neutral at 3.0 is invisible to the filter *and* to the ranker -- which is what makes
+    "forget that I said anything" possible without a delete endpoint.
+    """
+    if score <= DISLIKE_AT:
+        return Stance.DISLIKE
+    if score >= LIKE_AT:
+        return Stance.LIKE
+    return Stance.NEUTRAL
 
 #: The audit event type one movement entry is written as. Read back by this module and
 #: by ``app.api.plan``; nothing else should know the spelling.
@@ -79,6 +101,35 @@ class RatingOut(BaseModel):
     stance: Stance | None = None
 
 
+class PreferenceOut(BaseModel):
+    """One belief this app holds about one food, in terms a person can read."""
+
+    food_id: str
+    #: The food's own name out of the reference table, never its id. A list of uuids is
+    #: a list nobody can correct.
+    name: str
+    stance: Stance
+    score: float
+
+
+class PreferencesOut(BaseModel):
+    preferences: list[PreferenceOut] = Field(default_factory=list)
+
+
+class PreferenceIn(BaseModel):
+    """A correction, carrying the same 1-5 a rating carries.
+
+    Deliberately the *rating* and not a stance plus a score. If this took a stance the
+    caller would be choosing where the boundaries are, and there would be two places
+    that decide what "did not like it" means. It takes the number and applies
+    :func:`stance_for`, which is the one place.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    rating: int = Field(ge=1, le=5)
+
+
 class PlanItemProgressIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -119,7 +170,18 @@ async def log_meal(payload: LogMealIn, logs: Logs, audit: Audit) -> LogMealOut:
 )
 async def rate_meal(food_log_id: str, payload: RatingIn, logs: Logs, audit: Audit) -> RatingOut:
     """Record the rating and move the food's preference score by the same arithmetic
-    every time, so the user can predict what a 1-star does."""
+    every time, so the user can predict what a 1-star does.
+
+    Rating the same meal again is a correction, not a second opinion: ``logs.rate``
+    upserts on ``food_log_id``, so the row is replaced and the preference follows. It
+    used to be an insert, and the second tap came back a 409.
+
+    ``preference_updated`` is false, with no ``stance``, when the logged meal has no
+    ``food_id`` -- free text, a photo, anything the food table does not hold. The rating
+    is still stored against the log; there is simply no food for it to be about, so
+    nothing the planner reads has changed. Callers must say that rather than claim a
+    lesson was learned.
+    """
     await logs.rate(food_log_id, payload.rating, payload.note)
 
     food_id = await logs.food_id_for_log(food_log_id)
@@ -127,12 +189,7 @@ async def rate_meal(food_log_id: str, payload: RatingIn, logs: Logs, audit: Audi
         return RatingOut(food_log_id=food_log_id, rating=payload.rating)
 
     score = RATING_TO_SCORE[payload.rating]
-    if score <= DISLIKE_AT:
-        stance = Stance.DISLIKE
-    elif score >= LIKE_AT:
-        stance = Stance.LIKE
-    else:
-        stance = Stance.NEUTRAL
+    stance = stance_for(score)
     await logs.set_preference(food_id, stance, score)
     await audit.event(
         "food_rated", {"food_id": food_id, "rating": payload.rating, "stance": stance.value}
@@ -142,6 +199,78 @@ async def rate_meal(food_log_id: str, payload: RatingIn, logs: Logs, audit: Audi
         rating=payload.rating,
         preference_updated=True,
         stance=stance,
+    )
+
+
+@router.get(
+    "/preferences",
+    response_model=PreferencesOut,
+    summary="Every food this app has formed a belief about",
+)
+async def list_preferences(logs: Logs) -> PreferencesOut:
+    """What the planner will act on, exactly as it will act on it.
+
+    This is the read behind the tastes screen, and it exists because a belief the person
+    cannot see is worse than no belief: the filter drops a disliked food silently, and
+    without this the only evidence of it is a plan that quietly stopped offering
+    something. Names are resolved from the ``foods`` table by the repository, so nothing
+    here composes a label.
+
+    Sorted by name so the list stays in the same order between visits -- a list that
+    reshuffles is a list you cannot correct twice in a row.
+    """
+    prefs = await logs.preferences()
+    return PreferencesOut(
+        preferences=[
+            PreferenceOut(
+                food_id=pref.food_id, name=pref.name, stance=pref.stance, score=pref.score
+            )
+            for pref in sorted(prefs, key=lambda pref: pref.name.casefold())
+        ]
+    )
+
+
+@router.put(
+    "/preferences/{food_id}",
+    response_model=PreferenceOut,
+    summary="Change what we believe about one food",
+)
+async def set_food_preference(
+    food_id: str, payload: PreferenceIn, logs: Logs, audit: Audit
+) -> PreferenceOut:
+    """Correct one belief directly, without inventing a meal to hang it on.
+
+    Without this, the only way to change your mind about a food was to log eating it
+    again and rate that -- which would add a portion of it to the day's intake and pull
+    the whole gap report out of shape. A correction is not a meal.
+
+    A PUT because it replaces: sending the same rating twice leaves exactly the same row,
+    so a retry after a dropped connection is safe, which is why ``ApiClient.putMap`` is
+    allowed to replay it and ``postMap`` is not.
+
+    There is no DELETE. A rating of 3 lands on ``Stance.NEUTRAL`` at 3.0, which
+    ``filter_foods`` does not exclude and ``rank_foods`` gives no bonus or penalty to --
+    genuinely "forget I said anything", reached by the same three buttons as everything
+    else rather than by a fourth control that behaves differently.
+    """
+    score = RATING_TO_SCORE[payload.rating]
+    stance = stance_for(score)
+    await logs.set_preference(food_id, stance, score)
+
+    stored = await logs.preference(food_id)
+    if stored is None:
+        # The write went in under RLS as this user, so a read that comes back with
+        # nothing means the id is not a food we hold -- not that the write failed. Saying
+        # "we do not have that food" is the truthful answer, and it stops the tastes list
+        # filling with rows nobody can put a name to.
+        raise NotFound("We do not have that food in our list, so there is nothing to change.")
+
+    await audit.event(
+        "food_preference_set",
+        {"food_id": food_id, "rating": payload.rating, "stance": stance.value},
+    )
+    return PreferenceOut(
+        food_id=stored.food_id, name=stored.name, stance=stored.stance, score=stored.score
     )
 
 

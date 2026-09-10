@@ -48,6 +48,40 @@ class FakeHealthRepository implements HealthRepository {
   /// and is enough for a widget test to prove the right call was made.
   final Map<String, bool> markedPlanItems = <String, bool>{};
 
+  /// Every meal written down in this session, oldest first.
+  ///
+  /// A list rather than a map because the ordering is the interesting part: a
+  /// screen that logs the same plate twice would double-count its nutrients on
+  /// the real backend, and a test can see that here.
+  final List<LoggedMeal> loggedMeals = <LoggedMeal>[];
+
+  /// The rating on each logged meal, by food log id. Newest answer wins, which
+  /// is what the backend's upsert on `food_log_id` does.
+  final Map<String, int> mealRatings = <String, int>{};
+
+  /// What we believe about each food, by food id.
+  ///
+  /// Seeded with two beliefs so the tastes screen has something to show in
+  /// sample mode. An empty screen would look like a screen that failed to load,
+  /// and the whole point of it is that a belief is visible.
+  final Map<String, TasteStance> foodPreferences = <String, TasteStance>{
+    'f_ragi': TasteStance.loved,
+    'f_chana': TasteStance.disliked,
+  };
+
+  /// Names for the foods the sample plan refers to.
+  ///
+  /// The real backend resolves these from the `foods` table; this is the same
+  /// idea, and it is what stops the tastes screen showing a column of ids.
+  static const Map<String, String> _foodNames = <String, String>{
+    'f_almonds': 'Almonds',
+    'f_ragi': 'Ragi (finger millet)',
+    'f_guava': 'Guava',
+    'f_rajma': 'Rajma (kidney beans)',
+    'f_chana': 'Roasted chana',
+    'f_palak': 'Palak (spinach)',
+  };
+
   /// The rows whose values have been confirmed, by [LabResult.rowId].
   ///
   /// The sample reports are shared by every instance and are never changed, so
@@ -309,6 +343,120 @@ class FakeHealthRepository implements HealthRepository {
   }) async {
     markedPlanItems[itemId] = done;
     await _settle<void>(null);
+  }
+
+  // ---------------------------------------------------------------- tastes
+
+  @override
+  Future<String> logMeal({
+    MealSlot? mealSlot,
+    String? foodId,
+    String? freeText,
+    String source = 'manual',
+  }) async {
+    if (foodId == null && (freeText ?? '').trim().isEmpty) {
+      // The same refusal the endpoint gives, so a screen that forgets to say
+      // what was eaten fails here rather than on somebody's phone.
+      throw const HealthRepositoryException(
+        'Tell us either which food it was, or what you ate in words.',
+      );
+    }
+    final String id = 'log-${loggedMeals.length + 1}';
+    loggedMeals.add(
+      LoggedMeal(id: id, mealSlot: mealSlot, foodId: foodId, freeText: freeText),
+    );
+    return _settle(id);
+  }
+
+  @override
+  Future<MealRating> rateMeal({
+    required String foodLogId,
+    required int rating,
+  }) async {
+    // Newest answer wins, exactly as the backend's upsert on `food_log_id`
+    // does. Rating the same meal twice is a correction, not a second opinion.
+    mealRatings[foodLogId] = rating;
+
+    String? foodId;
+    for (final LoggedMeal meal in loggedMeals) {
+      if (meal.id == foodLogId) {
+        foodId = meal.foodId;
+        break;
+      }
+    }
+    if (foodId == null) {
+      // No food behind the meal, so nothing the planner reads can move. The
+      // fake has to be honest about this or the "not in our food list" path is
+      // never seen until production.
+      return _settle(
+        MealRating(foodLogId: foodLogId, rating: rating),
+      );
+    }
+
+    final TasteStance stance = _stanceForRating(rating);
+    foodPreferences[foodId] = stance;
+    return _settle(
+      MealRating(
+        foodLogId: foodLogId,
+        rating: rating,
+        preferenceUpdated: true,
+        stance: stance,
+      ),
+    );
+  }
+
+  @override
+  Future<List<FoodPreference>> loadFoodPreferences() async {
+    final List<FoodPreference> rows = <FoodPreference>[
+      for (final MapEntry<String, TasteStance> entry in foodPreferences.entries)
+        FoodPreference(
+          foodId: entry.key,
+          // A belief nobody can name is one nobody can correct, so an id with
+          // no name behind it is left out rather than shown as itself. The
+          // backend does the same.
+          name: _foodNames[entry.key] ?? entry.key,
+          stance: entry.value,
+          score: entry.value.rating.toDouble(),
+        ),
+    ]..sort(
+        (FoodPreference a, FoodPreference b) =>
+            a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      );
+    return _settle(rows);
+  }
+
+  @override
+  Future<FoodPreference> setFoodPreference({
+    required String foodId,
+    required TasteStance stance,
+  }) async {
+    if (!_foodNames.containsKey(foodId)) {
+      throw const HealthRepositoryException(
+        'We do not have that food in our list, so there is nothing to change.',
+      );
+    }
+    foodPreferences[foodId] = stance;
+    return _settle(
+      FoodPreference(
+        foodId: foodId,
+        name: _foodNames[foodId] ?? foodId,
+        stance: stance,
+        score: stance.rating.toDouble(),
+      ),
+    );
+  }
+
+  /// The same arithmetic `app/api/feedback.py` uses, and for the same reason:
+  /// 3 is the only rating that is genuinely neutral, and everything at or below
+  /// 2 is a dislike.
+  static TasteStance _stanceForRating(int rating) {
+    if (rating <= 2) {
+      return TasteStance.disliked;
+    }
+    if (rating >= 4) {
+      return TasteStance.loved;
+    }
+    return TasteStance.okay;
   }
 
   /// This week's list, with any ticks made in this session still on it.
@@ -577,6 +725,7 @@ class FakeHealthRepository implements HealthRepository {
   static final List<MealPlanItem> _sampleMeals = <MealPlanItem>[
     const MealPlanItem(
       id: 'i1',
+      foodId: 'f_almonds',
       mealSlot: MealSlot.earlyMorning,
       title: 'Warm water with soaked almonds',
       portion: '250 ml, 6 almonds',
@@ -588,6 +737,7 @@ class FakeHealthRepository implements HealthRepository {
     ),
     const MealPlanItem(
       id: 'i2',
+      foodId: 'f_ragi',
       mealSlot: MealSlot.breakfast,
       title: 'Ragi dosa with coconut chutney',
       portion: '2 dosas, 40 g chutney',
@@ -605,6 +755,7 @@ class FakeHealthRepository implements HealthRepository {
     ),
     const MealPlanItem(
       id: 'i3',
+      foodId: 'f_guava',
       mealSlot: MealSlot.midMorning,
       title: 'Guava',
       portion: '1 medium',
@@ -616,6 +767,7 @@ class FakeHealthRepository implements HealthRepository {
     ),
     const MealPlanItem(
       id: 'i4',
+      foodId: 'f_rajma',
       mealSlot: MealSlot.lunch,
       title: 'Rajma, brown rice and a beetroot salad',
       portion: '1 cup rajma, 3/4 cup rice, 80 g salad',
@@ -632,6 +784,7 @@ class FakeHealthRepository implements HealthRepository {
     ),
     const MealPlanItem(
       id: 'i5',
+      foodId: 'f_chana',
       mealSlot: MealSlot.evening,
       title: 'Masala chai with roasted chana',
       portion: '150 ml, 30 g chana',
@@ -642,6 +795,7 @@ class FakeHealthRepository implements HealthRepository {
     ),
     const MealPlanItem(
       id: 'i6',
+      foodId: 'f_palak',
       mealSlot: MealSlot.dinner,
       title: 'Palak paneer with two phulkas',
       portion: '150 g curry, 2 phulkas',
@@ -955,4 +1109,23 @@ class FakeHealthRepository implements HealthRepository {
       ],
     ),
   ];
+}
+
+/// One meal written down by [FakeHealthRepository.logMeal].
+///
+/// [foodId] null is the case that matters: a meal typed in words, or read off a
+/// photo, has no row in the foods table, so rating it moves no preference. The
+/// fake keeps the distinction so a screen is tested against both.
+class LoggedMeal {
+  const LoggedMeal({
+    required this.id,
+    this.mealSlot,
+    this.foodId,
+    this.freeText,
+  });
+
+  final String id;
+  final MealSlot? mealSlot;
+  final String? foodId;
+  final String? freeText;
 }

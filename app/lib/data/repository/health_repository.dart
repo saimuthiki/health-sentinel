@@ -78,6 +78,69 @@ abstract class HealthRepository {
     required bool done,
   });
 
+  /// Write down that a meal was eaten, and get back the id of that entry.
+  ///
+  /// `POST /v1/feedback/meals`. Either [foodId] or [freeText] must say what it
+  /// was — the endpoint refuses a row that says neither, because a meal nobody
+  /// can name is not a fact about anybody's day.
+  ///
+  /// Only the id comes back, deliberately. It is the one thing a caller needs
+  /// (it is what [rateMeal] addresses) and the only field of the reply that is
+  /// not simply the request read back.
+  ///
+  /// **Call this once per meal.** `app/planner/context.py` sums `food_logs` to
+  /// work out what has already been eaten today, so a second row for the same
+  /// plate double-counts its nutrients and pulls the day's gap report — and
+  /// therefore tomorrow's plan — out of shape. To change a rating, re-send
+  /// [rateMeal] against the same id; that is a correction and the backend
+  /// stores it as one.
+  Future<String> logMeal({
+    MealSlot? mealSlot,
+    String? foodId,
+    String? freeText,
+    String source,
+  });
+
+  /// Say what one logged meal was worth, on the 1–5 the planner reads.
+  ///
+  /// `POST /v1/feedback/meals/{food_log_id}/rating`. Rating the same meal again
+  /// replaces the answer rather than adding one, so a mistap is correctable —
+  /// it used to be a 409.
+  ///
+  /// The reply is the point. [MealRating.preferenceUpdated] is false, with no
+  /// stance, when the logged meal has no food behind it: the rating is kept,
+  /// but nothing the planner reads has moved. A caller must say that plainly
+  /// rather than claim a lesson was learned. Use [TasteStance.rating] to pick
+  /// the number rather than writing one in.
+  Future<MealRating> rateMeal({
+    required String foodLogId,
+    required int rating,
+  });
+
+  /// Every food this app has formed a belief about, by name.
+  ///
+  /// `GET /v1/feedback/preferences`. This is the read behind the tastes screen,
+  /// and it exists because a belief nobody can see is worse than no belief: the
+  /// planner drops a disliked food silently, so without this the only evidence
+  /// is a plan that quietly stopped offering something.
+  Future<List<FoodPreference>> loadFoodPreferences();
+
+  /// Change what we believe about one food, and get the row back as it now is.
+  ///
+  /// `PUT /v1/feedback/preferences/{food_id}`. A correction with no meal
+  /// attached — changing your mind about soya is not the same as eating soya,
+  /// and if the only way to say so were to log one, every correction would add
+  /// a portion to the day's intake.
+  ///
+  /// There is no delete, and none is needed: [TasteStance.okay] is neutral at
+  /// 3.0, which the planner's filter does not act on and its ranking gives
+  /// nothing to. That is a real "forget this", reached by the same three
+  /// buttons as everything else.
+  Future<FoodPreference> setFoodPreference({
+    required String foodId,
+    required TasteStance stance,
+  });
+
   /// This week's shopping list, grouped into aisles by the backend.
   ///
   /// `GET /v1/grocery` builds the list the first time it is asked for by adding
