@@ -22,7 +22,7 @@ from app.api.deps import (
     require_consent,
 )
 from app.api.feedback import hydration_logged_on, movement_minutes_on
-from app.api.guarded import GuardedText, guarded_deterministic
+from app.api.guarded import GuardedText, guarded_deterministic, guarded_or_withheld
 from app.core.errors import NotFound, NotReady, ValidationFailed
 from app.domain.enums import Escalation, MealSlot, SafetyVerdict
 from app.planner.service import PlannerService
@@ -175,7 +175,7 @@ async def regenerate(
                 display_name=item.display_name,
                 grams=item.grams,
                 computed_nutrients=item.computed_nutrients,
-                why_text=planned.why_texts.get(index, guarded_deterministic(item.why_text)),
+                why_text=planned.why_texts.get(index, guarded_or_withheld(item.why_text)),
                 order_index=item.order_index,
             )
             for index, item in enumerate(planned.plan.items)
@@ -318,7 +318,7 @@ async def _read_or_generate(
                 display_name=item.display_name or names.get(item.food_id or "", ""),
                 grams=item.grams,
                 computed_nutrients=item.computed_nutrients,
-                why_text=guarded_deterministic(item.why_text),
+                why_text=guarded_or_withheld(item.why_text),
                 order_index=item.order_index,
             )
             for row, item in zip(rows, items, strict=False)

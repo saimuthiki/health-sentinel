@@ -22,6 +22,7 @@ audits every response model on the real app for the same property.
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from typing import Any
 
@@ -33,6 +34,7 @@ from app.core.errors import UnguardedText
 from app.core.logging import get_logger
 from app.domain.enums import Escalation, SafetyVerdict
 from app.domain.models import SafetyReport
+from app.safety import copy as safety_copy
 from app.safety.pipeline import guard as _pipeline_guard
 from app.safety.validator import validate as _validate
 
@@ -186,6 +188,10 @@ def guarded_deterministic(
     a red-flag message. Never for model output: model output goes through
     :func:`run_guarded`, which can regenerate and fall back. Here a violation is a bug in
     our own copy, so it raises rather than degrading quietly.
+
+    Raising is right when the string **is** the answer. Where the string explains one row
+    of a larger response, taking the whole response down with it is not: use
+    :func:`guarded_or_withheld` there.
     """
     report = _validate(text, escalation)
     if report.findings:
@@ -202,6 +208,62 @@ def guarded_many(
 ) -> list[GuardedText]:
     """:func:`guarded_deterministic` over a sequence."""
     return [guarded_deterministic(text, escalation) for text in texts]
+
+
+#: Violation codes for every deterministic string this process has refused to show, most
+#: recent last. Our own copy failing the validator is a bug in us and has to stay
+#: noticeable: the ``log.error`` below is the alert a log aggregator keys on, and this is
+#: what a test -- or a future ops endpoint -- can read back inside the process. Only the
+#: violation codes are kept, never the text: the text is health data, and keeping it out
+#: of anything that outlives the request is the whole job of :mod:`app.core.logging`.
+WITHHELD: deque[tuple[str, ...]] = deque(maxlen=64)
+
+
+def guarded_or_withheld(
+    text: str, escalation: Escalation = Escalation.ROUTINE
+) -> GuardedText:
+    """One row's own deterministic text, or a stand-in saying it could not be shown.
+
+    The same scan as :func:`guarded_deterministic`, and the failing text is discarded just
+    as hard: never returned, never logged, never partially repaired. What differs is the
+    blast radius. ``guarded_deterministic`` raises, which becomes a 500, which is how one
+    bad sentence took down ``GET /v1/reports/{id}`` -- and, because Today reads the latest
+    report's detail for escalations, the whole day with it.
+
+    Three requirements, in the order they beat each other:
+
+    1. text that failed validation is **never shown** -- it is replaced, not repaired;
+    2. the failure stays **loud** -- ``log.error`` with the violation codes, an entry in
+       :data:`WITHHELD`, and a stand-in sentence that tells the reader something is
+       missing rather than quietly rendering nothing;
+    3. losing one sentence must not cost the person the rest of the report.
+
+    Use this where the text explains **one row** of a response that is worth having
+    without it: a red-flag message, a review reason, a plan item's ``why_text``. Where the
+    string *is* the answer, failing loudly is still right and
+    :func:`guarded_deterministic` still raises. Model-generated text is a different case
+    and is untouched: it goes through :func:`run_guarded`, which regenerates once and then
+    serves the templated fallback.
+    """
+    report = _validate(text, escalation)
+    if not report.findings:
+        return _mint(text)
+    violations = tuple(finding.violation.value for finding in report.findings)
+    WITHHELD.append(violations)
+    log.error(
+        "deterministic text failed the safety validator",
+        violations=list(violations),
+        escalation=escalation.value,
+        withheld=True,
+    )
+    return _mint(safety_copy.WITHHELD_DETERMINISTIC)
+
+
+def guarded_many_or_withheld(
+    texts: Sequence[str], escalation: Escalation = Escalation.ROUTINE
+) -> list[GuardedText]:
+    """:func:`guarded_or_withheld` over a sequence. One bad line loses that line only."""
+    return [guarded_or_withheld(text, escalation) for text in texts]
 
 
 #: Field names that carry text a model may have written. A response model declaring one

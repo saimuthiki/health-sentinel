@@ -43,7 +43,7 @@ from app.api.deps import (
     get_safety_judge,
     require_consent,
 )
-from app.api.guarded import GuardedText, guarded_many
+from app.api.guarded import GuardedText, guarded_many, guarded_many_or_withheld
 from app.core.errors import ValidationFailed
 from app.domain.enums import SafetyVerdict
 from app.planner.weekly_summary import WeeklySummary, WeeklySummaryService
@@ -212,9 +212,13 @@ def _service(
 def _out(summary: WeeklySummary) -> WeeklySummaryOut:
     """The service's result as the wire shape.
 
-    ``lines`` and ``not_measured`` are minted with ``guarded_deterministic`` rather than
-    returned raw: they are our own copy, assembled from our own counts, and this codebase
-    scans even its own strings before showing them.
+    ``lines`` and ``not_measured`` are minted rather than returned raw: they are our own
+    copy, assembled from our own counts, and this codebase scans even its own strings
+    before showing them.
+
+    ``lines`` uses ``guarded_many_or_withheld`` because each line stands alone -- one line
+    that cannot be shown should cost that line, not the week. ``not_measured`` is fixed
+    constants, so a violation there is a straight bug in a literal and still raises.
     """
     facts = summary.facts
     note = facts.report
@@ -224,7 +228,7 @@ def _out(summary: WeeklySummary) -> WeeklySummaryOut:
         has_enough_data=not facts.is_quiet,
         summary=summary.encouragement,
         prose_source=_source(summary.prose_source),
-        lines=guarded_many(summary.lines),
+        lines=guarded_many_or_withheld(summary.lines),
         not_measured=guarded_many(list(summary.not_measured)),
         facts=WeekFactsOut(
             meals_planned=facts.planned_items,

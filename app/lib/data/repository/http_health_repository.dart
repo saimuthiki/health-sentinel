@@ -258,10 +258,7 @@ class HttpHealthRepository implements HealthRepository, CacheAware {
       String? headline;
       if (latest != null) {
         headline = _reportLine(latest);
-        // The private form, so a failure here is still a raw [ApiFailure] and
-        // the cache fallback below can see it.
-        final HealthReport detail = await _reportDetail(latest.id);
-        escalations = detail.escalations;
+        escalations = await _escalationsFor(latest.id);
       }
 
       final TodayBriefing briefing = TodayBriefing(
@@ -385,6 +382,34 @@ class HttpHealthRepository implements HealthRepository, CacheAware {
       // Never answered from the cache. A report screen shows lab values and any
       // red flag over them; both have to be current or absent.
       throw _wrap(failure);
+    }
+  }
+
+  /// The latest report's red flags, or one card saying they could not be read.
+  ///
+  /// This used to be a bare `await _reportDetail(...)`, and it is where the day went
+  /// when one report answered 500: the failure travelled out of [loadToday], past the
+  /// plan and the profile that had already loaded fine, and the person was told Today
+  /// could not be loaded. One report's detail is not the day.
+  ///
+  /// Surviving it must not turn into a quiet all-clear, so the failure is not swallowed:
+  /// it becomes [Wire.uncheckedFindingsNotice], which lands in `escalations` and renders
+  /// as an escalation card above everything else, exactly where a real finding would.
+  /// The person is told the difference between *nothing found* and *not checked*.
+  ///
+  /// Two failures are still let through, because neither is something this screen can
+  /// work around: an expired sign-in and a missing consent both have to stop the app and
+  /// send the person somewhere else.
+  Future<List<EscalationNotice>> _escalationsFor(String reportId) async {
+    try {
+      final HealthReport detail = await _reportDetail(reportId);
+      return detail.escalations;
+    } on ApiFailure catch (failure) {
+      if (failure.requiresSignIn ||
+          failure.kind == ApiFailureKind.consentRequired) {
+        rethrow;
+      }
+      return <EscalationNotice>[Wire.uncheckedFindingsNotice(raisedAt: _now())];
     }
   }
 

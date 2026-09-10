@@ -476,6 +476,39 @@ class Wire {
         'otherwise.',
   ];
 
+  /// The card shown when the latest report's findings could not be read at all.
+  ///
+  /// Today asks the server for the latest report's detail so that a red flag over it
+  /// sits above the rest of the day. When that request fails, the honest answer is not
+  /// an empty escalation list: an empty list reads as *nothing found*, and a finding
+  /// nobody managed to check is not the same thing as no finding. So the failure gets a
+  /// card of its own, in the same place and with the same weight, that says which of the
+  /// two this is. Fixed copy like every other escalation heading, naming no condition,
+  /// no medicine and no dose.
+  static const String uncheckedTitle = 'We could not check your latest report';
+
+  static const String uncheckedBody =
+      'The rest of your day loaded, but the findings on your most recent report could '
+      'not be read just now. Please treat this as not checked, rather than as nothing '
+      'found.';
+
+  static const List<String> uncheckedSteps = <String>[
+    'Pull down to refresh, or open the report from the Reports tab.',
+    'If it keeps failing, tell us. The fault is at our end, not with your report.',
+    'Keep to anything already prescribed to you unless your doctor says '
+        'otherwise.',
+  ];
+
+  /// [uncheckedTitle] and friends as the card Today renders.
+  static EscalationNotice uncheckedFindingsNotice({DateTime? raisedAt}) =>
+      EscalationNotice(
+        id: 'report-findings-unchecked',
+        title: uncheckedTitle,
+        body: uncheckedBody,
+        steps: uncheckedSteps,
+        raisedAt: raisedAt,
+      );
+
   // ------------------------------------------------------------------ chat
 
   static ChatMessage chatMessageFrom(Map<String, dynamic> json) => ChatMessage(

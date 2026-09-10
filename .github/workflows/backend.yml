@@ -1,10 +1,15 @@
 name: Backend
 
 on:
+  # db/seed is in here because backend/app/rules/biomarker_vocabulary.py mirrors
+  # db/seed/200_biomarkers.sql and db/seed/201_biomarker_synonyms.sql, and the safety
+  # validator's dual-use drug set is derived from that mirror. A biomarker seeded
+  # without the mirror being updated is a report that 500s, so the parity test in
+  # backend/tests/safety/test_dual_use_analytes.py has to run on a db-only change too.
   push:
-    paths: ['backend/**', '.github/workflows/backend.yml']
+    paths: ['backend/**', 'db/seed/**', '.github/workflows/backend.yml']
   pull_request:
-    paths: ['backend/**', '.github/workflows/backend.yml']
+    paths: ['backend/**', 'db/seed/**', '.github/workflows/backend.yml']
   workflow_dispatch:
 
 jobs:

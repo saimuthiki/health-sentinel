@@ -27,7 +27,7 @@ from app.ai.context import build_context_block
 from app.ai.prompts import for_task
 from app.ai.routing import Task, model_for
 from app.ai.schemas import DAY_PLAN_SCHEMA
-from app.api.guarded import Guarded, GuardedText, guarded_deterministic, run_guarded
+from app.api.guarded import Guarded, GuardedText, guarded_or_withheld, run_guarded
 from app.core.errors import UpstreamUnavailable
 from app.core.logging import get_logger
 from app.domain.enums import Escalation, MealSlot, SafetyVerdict, max_escalation
@@ -124,7 +124,7 @@ class PlannerService:
             plan=plan,
             rationale=guarded.text,
             why_texts={
-                index: guarded_deterministic(item.why_text)
+                index: guarded_or_withheld(item.why_text)
                 for index, item in enumerate(plan.items)
             },
             alerts=derived,

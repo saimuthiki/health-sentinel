@@ -57,6 +57,19 @@ BLOCKED_FALLBACK_URGENT = (
     "the questions worth asking at your follow-up."
 )
 
+#: Shown in place of one row's own explanation when text **this codebase wrote** failed
+#: the validator. Never the text that failed: that is withheld unconditionally.
+#:
+#: Our own copy tripping our own rail is a bug in us, so this sentence says so rather
+#: than pretending the row simply has nothing to explain. It is deliberately not
+#: reassuring: a withheld explanation is not an all-clear, and at URGENT escalation the
+#: card above it still carries the finding.
+WITHHELD_DETERMINISTIC = (
+    "We could not show this explanation safely, so we have left it out. That is a fault "
+    "in our own wording and not in your result; the reading itself is unchanged. Please "
+    "tell us you saw this, and ask your doctor about anything here that concerns you."
+)
+
 #: Sent back into the prompt when the first generation broke a rule.
 REGENERATION_INSTRUCTION = (
     "Your previous answer was rejected by the safety validator and was never shown to the "

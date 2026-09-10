@@ -21,7 +21,7 @@ from app.api.deps import (
     get_settings_dep,
     require_consent,
 )
-from app.api.guarded import GuardedText, guarded_deterministic
+from app.api.guarded import GuardedText, guarded_or_withheld
 from app.core.config import Settings
 from app.core.errors import NotFound, PayloadTooLarge
 from app.domain.enums import Escalation, ReportStatus, ResultStatus, max_escalation
@@ -83,6 +83,9 @@ class ReviewOut(BaseModel):
     value_text: str
     unit_text: str | None = None
     #: Written by app.rules, not by a model, and scanned anyway before it is returned.
+    #: If our own sentence ever fails that scan it is withheld and replaced -- the row
+    #: still arrives, so one bad reason cannot cost the reader the whole report. See
+    #: :func:`app.api.guarded.guarded_or_withheld`.
     reason: GuardedText
     suggested_biomarker: str | None = None
 
@@ -90,7 +93,10 @@ class ReviewOut(BaseModel):
 class RedFlagOut(BaseModel):
     code: str
     escalation: Escalation
-    #: Deterministic text from app.rules.red_flags.
+    #: Deterministic text from app.rules.red_flags, withheld and replaced rather than
+    #: raised on if it ever fails the scan. ``escalation`` and ``code`` are unaffected,
+    #: so a finding that cannot explain itself is still a finding on screen and never
+    #: silently an all-clear.
     message: GuardedText
     biomarker_code: str | None = None
 
@@ -193,7 +199,7 @@ async def report_detail(
             RedFlagOut(
                 code=flag.code,
                 escalation=flag.escalation,
-                message=guarded_deterministic(flag.message, flag.escalation),
+                message=guarded_or_withheld(flag.message, flag.escalation),
                 biomarker_code=flag.biomarker_code,
             )
             for flag in flags
@@ -285,7 +291,7 @@ def _detail(row: dict[str, Any], result: IngestResult) -> ReportDetail:
             RedFlagOut(
                 code=flag.code,
                 escalation=flag.escalation,
-                message=guarded_deterministic(flag.message, flag.escalation),
+                message=guarded_or_withheld(flag.message, flag.escalation),
                 biomarker_code=flag.biomarker_code,
             )
             for flag in result.red_flags
@@ -328,7 +334,7 @@ def _review_out(item: ReviewItem) -> ReviewOut:
         printed_test_name=item.printed_test_name,
         value_text=item.value_text,
         unit_text=item.unit_text,
-        reason=guarded_deterministic(item.reason),
+        reason=guarded_or_withheld(item.reason),
         suggested_biomarker=item.suggested_biomarker,
     )
 

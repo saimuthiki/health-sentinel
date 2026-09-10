@@ -13,6 +13,16 @@ Five rules, straight from the charter in ``CLAUDE.md``:
 4. ``TREATMENT_DISCOURAGED`` -- "stop taking", "you don't need your", "skip your dose".
 5. ``RED_FLAG_DOWNPLAYED``   -- reassurance in an output whose escalation is URGENT.
 
+**The one exception to rule 1 is a dual-use term** -- a word that is both a drug and an
+analyte we measure: ``thyroxine``, ``insulin``, ``testosterone``, ``cholecalciferol``,
+``cyanocobalamin``. Naming an analyte that was measured is not prescribing: "Your Free
+Thyroxine is 1.2 ng/dL" is a fact about a blood test, and it used to be a violation, which
+took a real report down with a 500. For those terms only, the violation additionally
+requires a **prescribing context in the same sentence** -- see
+:func:`_prescribing_context`. Which terms those are is derived from our own biomarker
+catalogue in :mod:`app.safety.analytes`, never hand-written. Every other drug name is
+unchanged and absolute: metformin is a violation with or without a cue.
+
 **The hard case is rule 2.** "Take 60,000 IU of vitamin D weekly" is a prescription and must
 fire; "have 100 g of ragi at breakfast" is coaching and must not. The distinction is made on
 three axes, all inside a single sentence:
@@ -36,6 +46,7 @@ from collections.abc import Iterable, Sequence
 
 from app.domain.enums import Escalation, SafetyVerdict, SafetyViolation
 from app.domain.models import SafetyFinding, SafetyReport
+from app.safety.analytes import DUAL_USE_DRUGS
 from app.safety.drugs import (
     AMBIGUOUS_UNITS,
     BRAND_DRUGS,
@@ -114,6 +125,39 @@ RECOMMENDATION_CUES: tuple[str, ...] = (
     "at night", "in the morning",
 )
 CUE_RE = re.compile(rf"{_LEFT}(?:{_alternation(RECOMMENDATION_CUES)}){_RIGHT}", re.IGNORECASE)
+
+#: A substance is being **prescribed**: started, stopped, changed, given or taken. Much
+#: narrower than :data:`RECOMMENDATION_CUES` on purpose. This set decides whether a
+#: dual-use term (:mod:`app.safety.analytes`) is a prescription or a lab result, so every
+#: word here has to be one that cannot appear in an ordinary sentence *reporting* a
+#: measurement. That rules out the reporting verbs "usual", "usually", "standard",
+#: "typical", "suggests", "recommend", "advise" and the bare quantifiers "daily",
+#: "weekly", "once", "twice" -- all of which are legitimate cues for rule 2 but would
+#: fire on "Your Free Thyroxine is 1.2 ng/dL, which is in the usual range."
+PRESCRIBING_CUES: tuple[str, ...] = (
+    # being taken or given
+    "take", "takes", "taking", "taken", "took", "consume", "consumes", "consuming",
+    "swallow", "swallows", "swallowing", "inject", "injects", "injected", "injecting",
+    "administer", "administers", "administered", "administering",
+    # being started, stopped or changed
+    "start", "starts", "started", "starting", "stop", "stops", "stopped", "stopping",
+    "begin", "begins", "began", "beginning", "switch", "switches", "switched",
+    "switching", "continue", "continues", "continued", "continuing",
+    "increase", "increases", "increased", "increasing", "decrease", "decreases",
+    "decreased", "decreasing", "reduce", "reduces", "reduced", "reducing",
+    "double", "doubling", "halve", "halving", "titrate", "titrates", "titrated",
+    "titrating", "adjust", "adjusts", "adjusted", "adjusting",
+    "skip", "skips", "skipped", "skipping", "add", "adds", "added", "adding",
+    # being ordered, or said to be needed
+    "prescribe", "prescribes", "prescribing", "prescribed", "prescription",
+    "need", "needs", "needed", "put you on", "puts you on", "started you on",
+    # the shape of a course of treatment
+    "therapy", "therapies", "treatment", "treatments", "replacement", "regimen",
+    "course", "strength", "supplement", "supplements", "supplementation",
+)
+PRESCRIBING_CUE_RE = re.compile(
+    rf"{_LEFT}(?:{_alternation(PRESCRIBING_CUES)}){_RIGHT}", re.IGNORECASE
+)
 MEDICINE_WORD_RE = re.compile(
     rf"{_LEFT}(?:{_alternation(MEDICINE_FORM_WORDS)}){_RIGHT}", re.IGNORECASE
 )
@@ -273,13 +317,81 @@ def _finding(
 # ------------------------------------------------------------------------ detectors
 
 
+#: ``lower-cased, no spaces, no hyphens`` -> the dictionary term. ``DRUG_RE`` matches a
+#: term with flexible whitespace, an optional hyphen and an optional plural, so this is
+#: how a match is put back onto the entry it came from.
+_DRUG_TERMS_BY_KEY: dict[str, str] = {
+    "".join(ch for ch in term.lower() if ch not in " -"): term.lower() for term in ALL_DRUGS
+}
+
+
+def _dictionary_term(matched: str) -> str:
+    """The dictionary entry ``matched`` came from, or the match itself if it is unknown.
+
+    Unknown cannot really happen -- ``DRUG_RE`` is built from the dictionary -- and if it
+    ever did, the term would not be in :data:`DUAL_USE_DRUGS` and so would be treated as
+    an absolute violation. Failing towards the stricter rule is the right direction.
+    """
+    key = "".join(ch for ch in matched.lower() if ch not in " -\t\n\r")
+    for candidate in (key, key[:-2] if key.endswith("es") else "", key[:-1]):
+        if candidate and candidate in _DRUG_TERMS_BY_KEY:
+            return _DRUG_TERMS_BY_KEY[candidate]
+    return matched.lower()
+
+
+def _prescribing_context(sentence: str) -> bool:
+    """True when this sentence is about *giving* a substance, not about measuring one.
+
+    Four independent signals, any one of which is enough:
+
+    1. a prescribing cue -- take, start, stop, switch, prescribe, need, therapy;
+    2. a medicine word -- tablet, capsule, injection, dose, supplement, medication;
+    3. a **dose-tier** quantity -- ``50 mcg``, ``500 mg``, ``2 tablets``. Lab units are
+       not dose-tier: ``ng/dL``, ``uIU/mL`` and ``ug/dL`` are all rejected by
+       :data:`QUANTITY_RE`'s concentration lookahead or are not units it knows;
+    4. a drug that is **not** dual-use sharing the sentence -- "thyroxine or metformin"
+       is a sentence about medicines, so the dual-use word in it is one too.
+    """
+    if PRESCRIBING_CUE_RE.search(sentence) or MEDICINE_WORD_RE.search(sentence):
+        return True
+    for quantity in QUANTITY_RE.finditer(sentence):
+        if _unit_tier(quantity.group("unit")) == "pharma":
+            return True
+    return any(
+        _dictionary_term(match.group(0)) not in DUAL_USE_DRUGS
+        for match in DRUG_RE.finditer(sentence)
+    )
+
+
 def find_medications(text: str) -> list[SafetyFinding]:
-    """Rule 1: any generic or brand drug name, anywhere, in any casing."""
+    """Rule 1: any generic or brand drug name, anywhere, in any casing.
+
+    The single exception is a **dual-use** term -- one our own biomarker catalogue also
+    uses for something we measure (:mod:`app.safety.analytes`). Those fire only when
+    :func:`_prescribing_context` holds for the sentence they sit in, because otherwise
+    the app cannot say "your free thyroxine is 1.2 ng/dL" about a test it just read.
+    Nothing else is relaxed: a name that is only ever a drug is a violation on sight.
+    """
     clean, offsets = prepare(text)
-    return [
-        _finding(SafetyViolation.MEDICATION_NAMED, text, offsets, m.start(), m.end())
-        for m in DRUG_RE.finditer(clean)
-    ]
+    findings: list[SafetyFinding] = []
+    for offset, sentence in _sentences(clean):
+        prescribing: bool | None = None
+        for match in DRUG_RE.finditer(sentence):
+            if _dictionary_term(match.group(0)) in DUAL_USE_DRUGS:
+                if prescribing is None:
+                    prescribing = _prescribing_context(sentence)
+                if not prescribing:
+                    continue
+            findings.append(
+                _finding(
+                    SafetyViolation.MEDICATION_NAMED,
+                    text,
+                    offsets,
+                    offset + match.start(),
+                    offset + match.end(),
+                )
+            )
+    return findings
 
 
 def _unit_tier(unit: str) -> str:

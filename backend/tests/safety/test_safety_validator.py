@@ -38,6 +38,14 @@ CASES: list[tuple[str, str, Escalation, frozenset[SafetyViolation]]] = [
     ("hyphenated brand", "The Pan-D strip in your photo is a stomach medicine.", R, frozenset({MED})),
     ("supplement brand", "Shelcal is a calcium brand.", R, frozenset({MED})),
     ("pharma form of a nutrient", "Cholecalciferol sachets are a pharmacy product.", R, frozenset({MED})),
+    ("dual-use term prescribed", "Take thyroxine 50 mcg daily.", R, frozenset({MED, DOSE})),
+    ("dual-use term started", "Your doctor may start insulin.", R, frozenset({MED})),
+    # ---------------------------------- 1c. an analyte we measure is not a prescription
+    ("biomarker row label", "Total Testosterone", R, frozenset()),
+    ("lab value for a dual-use analyte",
+     "Your Free Thyroxine is 1.2 ng/dL, which is in the usual range.", R, frozenset()),
+    ("our own review sentence",
+     "We could not match the test name 'Thyroxine (T4)' to a biomarker we know.", R, frozenset()),
     # ------------------------------------ 1b. nutrients and foods must NOT be drugs
     ("nutrient iron", "Iron-rich foods like ragi, spinach and dates will help.", R, frozenset()),
     ("nutrient calcium", "Calcium and vitamin B12 come mostly from dairy and eggs.", R, frozenset()),
@@ -191,6 +199,7 @@ def test_the_safety_copy_itself_passes_the_validator() -> None:
         ("disclaimer", safety_copy.DISCLAIMER),
         ("blocked", safety_copy.BLOCKED_FALLBACK),
         ("blocked urgent", safety_copy.BLOCKED_FALLBACK_URGENT),
+        ("withheld deterministic", safety_copy.WITHHELD_DETERMINISTIC),
         *((f"card {level.value}", card) for level, card in safety_copy.ESCALATION_CARDS.items()),
     ):
         report = validate(text, Escalation.URGENT)

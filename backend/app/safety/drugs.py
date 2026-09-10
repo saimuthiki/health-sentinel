@@ -11,6 +11,14 @@ Two working rules kept this list honest:
    ``calcitriol``, ``methylcobalamin``, ``ferrous sulphate`` -- because those names only
    appear on a label, never in a kitchen.
 
+Rule 2 has a blind spot this file cannot see on its own: a label word can also be a **lab
+report** word. ``thyroxine``, ``insulin``, ``testosterone``, ``cholecalciferol`` and
+``cyanocobalamin`` all name things our own biomarker catalogue measures, so a sentence
+reporting the measurement is not a prescription. Nothing is removed from the dictionary
+for that -- :mod:`app.safety.analytes` works out which entries they are *from the
+biomarker catalogue*, and the validator asks for a prescribing context before it fires on
+those and only those. Every other entry here stays an absolute violation.
+
 Coverage is generic INN names plus the Indian brands a user is most likely to be holding.
 It will never be complete; see the validator's module docstring for what that means.
 """
