@@ -241,3 +241,36 @@ the repo, you enable **GitHub Pages** (repo → Settings → Pages → source `m
 4. **Your day**: wake time, sleep time, usual meal times, exercise days.
 5. **Your goals**, in your words.
 6. The **Gemini prompt template** you mentioned having, and any parsing code you wrote.
+
+---
+
+## M12 · Point the app at your backend  ⭐ do this to get a working APK
+
+Three values. All three are meant to be readable inside the installed app, so
+they are **variables**, not secrets.
+
+1. Go to your repository on GitHub.
+2. **Settings** (the tab along the top of the repo, not your account settings).
+3. In the left sidebar: **Secrets and variables** → **Actions**.
+4. Click the **Variables** tab (next to "Secrets" — it is easy to miss).
+5. **New repository variable**, three times:
+
+   | Name | Value |
+   |---|---|
+   | `SUPABASE_URL` | `https://dyvokrgvjrmikcnskxmv.supabase.co` |
+   | `SUPABASE_ANON_KEY` | your **anon / public** key from Settings → API |
+   | `API_BASE_URL` | `https://health-sentinel.onrender.com` |
+
+6. Go to the **Actions** tab → **Android app** → **Run workflow** → **Run workflow**.
+   In about eight minutes there is a new APK under Artifacts.
+
+**Why variables and not secrets.** The anon key is designed to ship inside a
+client. It is safe there *because* row level security is on — 34 tables, 107
+policies, all verified. The service-role key is the dangerous one, and it never
+goes near GitHub or the app; it lives only in Render.
+
+**When you rotate the JWT secret**, Supabase reissues the anon key too. Update
+`SUPABASE_ANON_KEY` here and re-run the workflow. No code change, no pull request.
+
+**Order matters:** rotate first, then set this variable. Setting it with the old
+key just means doing it twice.

@@ -21,6 +21,22 @@ jobs:
       # The `secrets` context is not available in a step-level `if`, but it is
       # available here. Steps branch on this string instead.
       HAS_KEYSTORE: ${{ secrets.KEYSTORE_BASE64 != '' }}
+      # Repository VARIABLES, not secrets, and deliberately so: all three are
+      # meant to be readable inside the installed app. The Supabase anon key is
+      # designed to ship in a client and is safe there precisely because row
+      # level security is on -- 34 tables, 107 policies. The service-role key is
+      # the dangerous one and never comes near this workflow or the app.
+      #
+      # They live here rather than in the code because rotating the Supabase JWT
+      # secret reissues the anon key, and that should be a one-field edit in
+      # GitHub rather than a code change and a review.
+      #
+      # Set them at: Settings -> Secrets and variables -> Actions -> Variables.
+      # Left unset, the build still succeeds and the app opens on its
+      # "Not connected yet" screen, which is the correct unconfigured behaviour.
+      SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+      API_BASE_URL: ${{ vars.API_BASE_URL }}
     steps:
       - uses: actions/checkout@v4
 
@@ -69,13 +85,33 @@ jobs:
           keyAlias=$KEY_ALIAS
           PROPS
 
+      - name: Report how this build is configured
+        # Says which values are present without printing any of them.
+        run: |
+          echo "SUPABASE_URL   : ${SUPABASE_URL:+set}${SUPABASE_URL:-NOT SET}"
+          echo "SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:+set}${SUPABASE_ANON_KEY:-NOT SET}"
+          echo "API_BASE_URL   : ${API_BASE_URL:+set}${API_BASE_URL:-NOT SET}"
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ] || [ -z "$API_BASE_URL" ]; then
+            echo "::notice::Building UNCONFIGURED. The app will open on 'Not connected yet'."
+          else
+            echo "::notice::Building configured against $API_BASE_URL"
+          fi
+
       - name: Build release APK
-        run: flutter build apk --release
+        run: |
+          flutter build apk --release \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" \
+            --dart-define=API_BASE_URL="$API_BASE_URL"
 
       - name: Build App Bundle
         # The Play Store takes .aab, not .apk. Sideloading to your own phone takes .apk.
         if: env.HAS_KEYSTORE == 'true'
-        run: flutter build appbundle --release
+        run: |
+          flutter build appbundle --release \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" \
+            --dart-define=API_BASE_URL="$API_BASE_URL"
 
       - name: Remove signing material
         if: always()
