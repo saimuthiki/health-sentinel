@@ -81,7 +81,7 @@ class HealthProfile {
   const HealthProfile({
     required this.userId,
     this.dob,
-    this.sex = Sex.undisclosed,
+    this.sex = Sex.other,
     this.heightCm,
     this.weightKg,
     this.activityLevel = ActivityLevel.light,
@@ -95,6 +95,7 @@ class HealthProfile {
     this.conditions = const <String>[],
     this.allergies = const <Allergy>[],
     this.goalTypes = const <GoalType>[],
+    this.hydrationTargetOverrideMl,
     this.updatedAt,
   });
 
@@ -121,8 +122,20 @@ class HealthProfile {
 
   final List<Allergy> allergies;
 
-  /// What they want to work on. Full goals live in `goals`; these seed them.
+  /// What they want to work on, most important first.
+  ///
+  /// These are rows in `goals`, not a column on `health_profiles`, but they are
+  /// carried on the profile because that is how they are asked and how they are
+  /// saved: one multi-select in the wizard, one `PUT /v1/me/profile`.
   final List<GoalType> goalTypes;
+
+  /// A water target the person set for themselves, in millilitres, or null when
+  /// they have not set one.
+  ///
+  /// Held and sent, never interpreted. What a sensible figure is, and what wins
+  /// when it disagrees with the computed target, belongs to the hydration work
+  /// and not to this model.
+  final int? hydrationTargetOverrideMl;
 
   final DateTime? updatedAt;
 
@@ -157,6 +170,7 @@ class HealthProfile {
     List<String>? conditions,
     List<Allergy>? allergies,
     List<GoalType>? goalTypes,
+    int? hydrationTargetOverrideMl,
     DateTime? updatedAt,
   }) {
     return HealthProfile(
@@ -176,6 +190,8 @@ class HealthProfile {
       conditions: conditions ?? this.conditions,
       allergies: allergies ?? this.allergies,
       goalTypes: goalTypes ?? this.goalTypes,
+      hydrationTargetOverrideMl:
+          hydrationTargetOverrideMl ?? this.hydrationTargetOverrideMl,
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }
@@ -201,6 +217,8 @@ class HealthProfile {
         goalTypes: asStringList(json['goal_types'])
             .map(GoalType.fromWire)
             .toList(),
+        hydrationTargetOverrideMl:
+            asIntOrNull(json['hydration_target_override_ml']),
         updatedAt: asTimestamp(json['updated_at']),
       );
 
@@ -222,6 +240,7 @@ class HealthProfile {
         'allergies':
             allergies.map((Allergy a) => a.toJson()).toList(),
         'goal_types': goalTypes.map((GoalType g) => g.wire).toList(),
+        'hydration_target_override_ml': hydrationTargetOverrideMl,
         'updated_at': timestampToJson(updatedAt),
       });
 }

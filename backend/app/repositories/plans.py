@@ -5,6 +5,7 @@ All user-scoped, all as the user, all RLS-enforced.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -272,17 +273,45 @@ class AlertRepository(UserScopedRepository):
         )
 
     async def replace(self, alerts: list[ScheduledAlert], *, keep_types: bool = True) -> Rows:
-        """Rewrite the generated alert set, preserving whatever the user switched off."""
-        existing = await self.all() if keep_types else []
+        """Rewrite the alert types in ``alerts``, and only those.
+
+        This used to delete every row the user had and reinsert whatever the caller
+        happened to derive. That is fine on the one day a week the grocery reminder is
+        derived and destructive on the other six: generating a plan on a Tuesday wiped
+        the Saturday grocery alert, and nothing ever put it back.
+
+        So a rewrite is scoped to the types it actually carries. A type this call knows
+        nothing about -- because it is derived on another day, or written by another part
+        of the app, or added by whoever owns ``planner/alerts.py`` next -- is left exactly
+        where it was. The scope is read off ``alerts`` itself, so it stays correct however
+        that set changes.
+
+        ``keep_types`` still means what it meant -- carry the user's own switches and
+        quiet hours across the rewrite. It no longer decides whether the existing rows are
+        read at all: that read is what makes the delete precise, so it always happens.
+        """
+        existing = await self.all()
         disabled = {
             str(row.get("alert_type"))
             for row in existing
-            if row.get("enabled") is False
+            if keep_types and row.get("enabled") is False
         }
-        quiet = next(
-            (row.get("quiet_hours") for row in existing if row.get("quiet_hours")), {}
+        quiet = (
+            next((row.get("quiet_hours") for row in existing if row.get("quiet_hours")), {})
+            if keep_types
+            else {}
         )
-        await self.db.delete("alerts", filters=self._mine, returning=False)
+        mine = {alert.alert_type.value for alert in alerts}
+        superseded = sorted(
+            str(row["id"])
+            for row in existing
+            if row.get("id") and str(row.get("alert_type")) in mine
+        )
+        if superseded:
+            # By id, not by type: a filter on user_id alone is what caused the bug.
+            await self.db.delete(
+                "alerts", filters={**self._mine, "id": in_(superseded)}, returning=False
+            )
         if not alerts:
             return []
         return await self.db.insert(
@@ -319,8 +348,137 @@ class AlertRepository(UserScopedRepository):
         )
 
 
+#: The goal types ``goals.goal_type_check`` in db/migrations/005 will accept.
+#:
+#: ``GoalType`` has an eighth member, ``diet_quality``, that the constraint does not
+#: list. Writing one would be a 400 from Postgres at save time, so it is refused at the
+#: edge with a sentence instead. Adding it to the constraint is a one-line ALTER and is
+#: reported with this change; it is not done here because db/migrations is not mine.
+PERSISTABLE_GOAL_TYPES: frozenset[GoalType] = frozenset(
+    {
+        GoalType.WEIGHT,
+        GoalType.HAIR,
+        GoalType.SKIN,
+        GoalType.ENERGY,
+        GoalType.SLEEP,
+        GoalType.FITNESS,
+        GoalType.DEFICIENCY,
+    }
+)
+
+#: ``goals.title`` is NOT NULL and it is the string the planning prompt prints after
+#: "GOALS", so a new row needs one. These are the areas themselves and nothing more.
+#: "weight" is not "lose weight": the wizard asks which areas to work on, it does not ask
+#: for a direction, and a backend that supplies one is putting words in the user's mouth
+#: in the one place the model will read them back. A title the person or the chat
+#: pipeline writes later is never overwritten by these.
+GOAL_TITLES: dict[GoalType, str] = {
+    GoalType.WEIGHT: "Weight",
+    GoalType.HAIR: "Hair",
+    GoalType.SKIN: "Skin",
+    GoalType.ENERGY: "Energy",
+    GoalType.SLEEP: "Sleep",
+    GoalType.FITNESS: "Fitness",
+    GoalType.DEFICIENCY: "A low nutrient",
+    GoalType.DIET_QUALITY: "Diet quality",
+}
+
+
 class GoalRepository(UserScopedRepository):
     """``goals`` and ``user_memory`` -- the two learned inputs to the planner."""
+
+    async def replace_types(self, goal_types: Sequence[GoalType]) -> list[Goal]:
+        """Make the user's active goals exactly ``goal_types``, in the order given.
+
+        The wizard asks this as one multi-select, and ``PUT /v1/me/profile`` replaces,
+        so the write is a set-replace. It is done by reconciling rather than by deleting
+        and reinserting, for the same reason the alert rewrite above is:
+
+        * a goal the person has had all along keeps its row -- its id, its ``created_at``,
+          its ``target``, and any ``title`` they or the chat pipeline wrote for it;
+        * a goal they have dropped is **closed**, not deleted, so the record of having
+          worked on it survives;
+        * a goal they pick up again reopens the row it had before instead of starting a
+          second one.
+
+        ``priority`` is the position in the list, so the order the chips were tapped is
+        the order ``app/ai/context.py`` prints them in. It is written as text because the
+        column is text; single digits sort correctly either way.
+
+        One write per goal, which is at most eight -- ``ProfileIn.goal_types`` caps the
+        list. A bulk upsert would be one round trip instead, but it would have to re-send
+        every column of every row to do it, and re-sending ``target`` and ``created_at``
+        from a five-column read is how you lose them.
+        """
+        wanted: list[GoalType] = []
+        for goal_type in goal_types:
+            if goal_type not in wanted:
+                wanted.append(goal_type)
+
+        rows = await self.db.select(
+            "goals",
+            columns="id,goal_type,title,priority,status",
+            filters=self._mine,
+            limit=200,
+        )
+
+        # One row carried forward per type -- an active one if there is one, so the
+        # ordinary case of "still working on this" touches nothing that matters.
+        carried: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            goal_type_value = str(row.get("goal_type") or "")
+            held = carried.get(goal_type_value)
+            if held is None or (
+                str(held.get("status")) != "active" and str(row.get("status")) == "active"
+            ):
+                carried[goal_type_value] = row
+
+        kept: set[str] = set()
+        for index, goal_type in enumerate(wanted):
+            priority = str(index + 1)
+            row = carried.get(goal_type.value)
+            if row is None or not row.get("id"):
+                await self.db.insert(
+                    "goals",
+                    {
+                        "user_id": self.user_id,
+                        "goal_type": goal_type.value,
+                        "title": GOAL_TITLES[goal_type],
+                        "priority": priority,
+                        "status": "active",
+                    },
+                    returning=False,
+                )
+                continue
+            goal_id = str(row["id"])
+            kept.add(goal_id)
+            await self.db.update(
+                "goals",
+                {
+                    "status": "active",
+                    "priority": priority,
+                    "closed_at": None,
+                    "title": str(row.get("title") or "").strip() or GOAL_TITLES[goal_type],
+                },
+                filters={**self._mine, "id": eq(goal_id)},
+                returning=False,
+            )
+
+        dropped = sorted(
+            str(row["id"])
+            for row in rows
+            if row.get("id")
+            and str(row.get("status")) == "active"
+            and str(row["id"]) not in kept
+        )
+        if dropped:
+            await self.db.update(
+                "goals",
+                {"status": "closed", "closed_at": datetime.now(UTC).isoformat()},
+                filters={**self._mine, "id": in_(dropped)},
+                returning=False,
+            )
+        return await self.active_goals()
 
     async def active_goals(self) -> list[Goal]:
         rows = await self.db.select(
@@ -438,6 +596,8 @@ def week_start_for(day: date) -> date:
 
 
 __all__ = [
+    "GOAL_TITLES",
+    "PERSISTABLE_GOAL_TYPES",
     "AlertRepository",
     "FoodLogRepository",
     "GoalRepository",

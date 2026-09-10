@@ -12,11 +12,12 @@ from datetime import date, time
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.api.deps import CurrentUser, get_profiles
-from app.domain.enums import ActivityLevel, DietType, MealSlot, Sex
-from app.domain.models import Allergy, HealthProfile
+from app.api.deps import CurrentUser, get_goals, get_profiles
+from app.domain.enums import ActivityLevel, DietType, GoalType, MealSlot, Sex
+from app.domain.models import Allergy, Goal, HealthProfile
+from app.repositories.plans import PERSISTABLE_GOAL_TYPES, GoalRepository
 from app.repositories.profiles import (
     CONSENT_TYPES,
     CURRENT_CONSENT_VERSION,
@@ -60,12 +61,42 @@ class ProfileIn(BaseModel):
     diet_type: DietType = DietType.NON_VEG
     cuisine_pref: list[str] = Field(default_factory=list, max_length=12)
     city: str | None = Field(default=None, max_length=80)
+    pincode: str | None = Field(default=None, max_length=12)
     wake_time: time | None = None
     sleep_time: time | None = None
     meal_times: dict[MealSlot, time] = Field(default_factory=dict)
     conditions: list[str] = Field(default_factory=list, max_length=20)
     allergies: list[AllergyIn] = Field(default_factory=list, max_length=40)
     is_pregnant: bool = False
+
+    #: What the person wants the plan to work on, most important first.
+    #:
+    #: These live in ``goals``, not in ``health_profiles``, and they are on this model
+    #: rather than behind an endpoint of their own because the wizard asks them as one
+    #: more question on one screen and saves the lot with one button. Two writes behind
+    #: one Save is two ways for half of it to land.
+    goal_types: list[GoalType] = Field(default_factory=list, max_length=8)
+
+    #: A water target the person set for themselves. Stored as given; nothing here
+    #: decides whether it is a sensible number, because nothing here is entitled to.
+    hydration_target_override_ml: int | None = None
+
+    @field_validator("pincode")
+    @classmethod
+    def _tidy_pincode(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+    @field_validator("goal_types")
+    @classmethod
+    def _storable_goals(cls, value: list[GoalType]) -> list[GoalType]:
+        unknown = [g.value for g in value if g not in PERSISTABLE_GOAL_TYPES]
+        if unknown:
+            raise ValueError(
+                "we cannot record " + ", ".join(sorted(unknown)) + " as a goal yet"
+            )
+        return value
 
     def to_domain(self, user_id: str) -> HealthProfile:
         return HealthProfile(
@@ -78,6 +109,7 @@ class ProfileIn(BaseModel):
             diet_type=self.diet_type,
             cuisine_pref=list(self.cuisine_pref),
             city=self.city,
+            pincode=self.pincode,
             wake_time=self.wake_time,
             sleep_time=self.sleep_time,
             meal_times=dict(self.meal_times),
@@ -87,6 +119,7 @@ class ProfileIn(BaseModel):
                 for a in self.allergies
             ],
             is_pregnant=self.is_pregnant,
+            hydration_target_override_ml=self.hydration_target_override_ml,
         )
 
 
@@ -100,16 +133,19 @@ class ProfileOut(BaseModel):
     diet_type: DietType
     cuisine_pref: list[str]
     city: str | None
+    pincode: str | None
     wake_time: time | None
     sleep_time: time | None
     meal_times: dict[MealSlot, time]
     conditions: list[str]
     allergies: list[AllergyIn]
     is_pregnant: bool
+    goal_types: list[GoalType] = Field(default_factory=list)
+    hydration_target_override_ml: int | None = None
     age_years: int | None = None
 
     @classmethod
-    def of(cls, profile: HealthProfile) -> ProfileOut:
+    def of(cls, profile: HealthProfile, goals: list[Goal] | None = None) -> ProfileOut:
         return cls(
             user_id=profile.user_id,
             dob=profile.dob,
@@ -120,6 +156,7 @@ class ProfileOut(BaseModel):
             diet_type=profile.diet_type,
             cuisine_pref=list(profile.cuisine_pref),
             city=profile.city,
+            pincode=profile.pincode,
             wake_time=profile.wake_time,
             sleep_time=profile.sleep_time,
             meal_times=dict(profile.meal_times),
@@ -128,6 +165,10 @@ class ProfileOut(BaseModel):
                 AllergyIn(allergen=a.allergen, severity=a.severity) for a in profile.allergies
             ],
             is_pregnant=profile.is_pregnant,
+            # Already ordered by priority by the repository, so the list comes back in
+            # the order the person put their goals in.
+            goal_types=[goal.goal_type for goal in (goals or [])],
+            hydration_target_override_ml=profile.hydration_target_override_ml,
             age_years=profile.age_on(date.today()),
         )
 
@@ -154,6 +195,7 @@ class ConsentStatus(BaseModel):
 
 
 Profiles = Annotated[ProfileRepository, Depends(get_profiles)]
+Goals = Annotated[GoalRepository, Depends(get_goals)]
 
 
 @router.get("", response_model=Me, summary="The signed-in user")
@@ -171,16 +213,24 @@ async def me(principal: CurrentUser, profiles: Profiles) -> Me:
 
 
 @router.get("/profile", response_model=ProfileOut, summary="My health profile")
-async def read_profile(principal: CurrentUser, profiles: Profiles) -> ProfileOut:
+async def read_profile(
+    principal: CurrentUser, profiles: Profiles, goals: Goals
+) -> ProfileOut:
     """Always returns a profile. An unfilled one carries the documented defaults, which
     is honest -- the app should show empty fields, not a 404."""
-    return ProfileOut.of(await profiles.health_profile())
+    return ProfileOut.of(await profiles.health_profile(), await goals.active_goals())
 
 
 @router.put("/profile", response_model=ProfileOut, summary="Create or update my profile")
 async def write_profile(
-    payload: ProfileIn, principal: CurrentUser, profiles: Profiles
+    payload: ProfileIn, principal: CurrentUser, profiles: Profiles, goals: Goals
 ) -> ProfileOut:
+    """Replace the profile, and with it the set of goals being worked on.
+
+    The goals are written after the profile rather than before it. If the profile write
+    fails there is nothing to explain the goals, and leaving them unchanged is the state
+    the user can see and retry from.
+    """
     if any((payload.display_name, payload.locale, payload.timezone)):
         await profiles.upsert_account(
             display_name=payload.display_name,
@@ -188,7 +238,8 @@ async def write_profile(
             timezone=payload.timezone,
         )
     saved = await profiles.save_health_profile(payload.to_domain(principal.user_id))
-    return ProfileOut.of(saved)
+    active = await goals.replace_types(payload.goal_types)
+    return ProfileOut.of(saved, active)
 
 
 @router.get("/consents", response_model=ConsentStatus, summary="My consent records")

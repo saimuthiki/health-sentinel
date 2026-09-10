@@ -21,6 +21,17 @@ One mismatch is left standing on purpose:
   the ones above -- they mean different things to a person. The real fix is a new enum
   member, and because ``Sex`` selects reference ranges, that deserves a deliberate pass
   rather than a drive-by. Recorded in db/migrations/009 as a decision, not an oversight.
+  The app no longer offers "prefer not to say", so no new row can be written with it;
+  rows written before that still read back as ``Sex.OTHER``.
+
+And one column is written here that the schema does not have yet:
+
+* ``health_profiles.hydration_target_override_ml``. The profile contract carries a water
+  target the person set for themselves, and it is written as null when they have not set
+  one. **The column has to exist before this ships** -- the SQL is in the handover notes
+  for this change. Until it is applied, PostgREST answers every profile write with a 400,
+  which is loud, immediate and impossible to miss; omitting the key instead would have
+  meant a target that silently could never be cleared.
 """
 
 from __future__ import annotations
@@ -88,6 +99,14 @@ def slot_from_db(value: str | None) -> MealSlot | None:
 # --------------------------------------------------------------------------- sex
 
 
+def _text(value: Any) -> str | None:
+    """A text column trimmed, with blank read back as unset."""
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
 def sex_from_db(value: str | None) -> Sex:
     raw = (value or "").strip()
     if raw in ("male", "female"):
@@ -131,6 +150,18 @@ def parse_float(value: Any) -> float | None:
         return None
 
 
+def parse_int(value: Any) -> int | None:
+    """An integer column, or None. A value that is not a whole number reads as None
+    rather than as a rounded one -- a millilitre figure nobody typed is worse than
+    none."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def iso(value: date | time | None) -> str | None:
     return value.isoformat() if value is not None else None
 
@@ -167,6 +198,7 @@ def health_profile_from_rows(
         diet_type=diet,
         cuisine_pref=list(row.get("cuisine_pref") or []),
         city=row.get("city"),
+        pincode=_text(row.get("pincode")),
         wake_time=parse_time(row.get("wake_time")),
         sleep_time=parse_time(row.get("sleep_time")),
         meal_times=meal_times,
@@ -180,6 +212,7 @@ def health_profile_from_rows(
             if str(a.get("allergen", "")).strip()
         ],
         is_pregnant=bool(row.get("pregnancy", False)),
+        hydration_target_override_ml=parse_int(row.get("hydration_target_override_ml")),
     )
 
 
@@ -194,9 +227,16 @@ def health_profile_to_row(profile: HealthProfile) -> dict[str, Any]:
         "diet_type": profile.diet_type.value,
         "cuisine_pref": list(profile.cuisine_pref),
         "city": profile.city,
+        "pincode": profile.pincode,
         "wake_time": iso(profile.wake_time),
         "sleep_time": iso(profile.sleep_time),
         "meal_times": {slot_to_db(k): v.isoformat() for k, v in profile.meal_times.items()},
         "conditions": list(profile.conditions),
         "pregnancy": profile.is_pregnant,
+        # Written as null when unset rather than omitted: PUT replaces the profile, so a
+        # key left out is a value that can never be cleared again. This needs
+        # health_profiles.hydration_target_override_ml to exist -- the SQL is
+        # db/run-in-supabase/5_water_target_and_goals.sql, and until it has been run every
+        # profile write is a 400. Loud and immediate beats a target that silently sticks.
+        "hydration_target_override_ml": profile.hydration_target_override_ml,
     }

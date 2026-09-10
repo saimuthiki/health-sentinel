@@ -1276,3 +1276,9 @@ select
 from pg_constraint c, pg_constraint c2
 where c.conname = 'health_profiles_activity_level_check'
   and c2.conname = 'meal_plan_items_meal_slot_check';
+
+
+-- Added after the first four files were written; see
+-- 5_water_target_and_goals.sql for the explanation and the check query.
+alter table public.health_profiles
+  add column if not exists hydration_target_override_ml integer;

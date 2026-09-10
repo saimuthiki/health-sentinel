@@ -14,8 +14,11 @@ import '../models/models.dart';
 ///   one all the way to the screen. See [LabResult.valueText] for why that is a
 ///   safety property and not a typing accident.
 /// * **Some things the app models do not exist server-side yet** — day nutrient
-///   totals, goals, biomarker trends, a report headline. Those come back empty.
+///   totals, biomarker trends, a report headline. Those come back empty.
 ///   Empty is honest; a plausible number the client worked out for itself is not.
+///   Goals used to be on that list. They are not any more: `ProfileIn` takes
+///   `goal_types` and `ProfileOut` gives them back, so what the wizard collects
+///   reaches the planner instead of stopping here.
 class Wire {
   const Wire._();
 
@@ -120,12 +123,20 @@ class Wire {
       dietType: DietType.fromWire(json['diet_type']),
       cuisinePrefs: asStringList(json['cuisine_pref']),
       city: asStringOrNull(json['city']),
+      pincode: _nonEmpty(asString(json['pincode'])),
       wakeTime: normaliseTimeOfDay(asStringOrNull(json['wake_time'])) ?? '06:30',
       sleepTime:
           normaliseTimeOfDay(asStringOrNull(json['sleep_time'])) ?? '22:30',
       mealTimes: meals,
       conditions: asStringList(json['conditions']),
       allergies: allergies,
+      // `ProfileOut.goal_types` is ordered by priority, so the list arrives in
+      // the order the goals were chosen and stays in it.
+      goalTypes: asStringList(json['goal_types'])
+          .map(GoalType.fromWire)
+          .toList(),
+      hydrationTargetOverrideMl:
+          asIntOrNull(json['hydration_target_override_ml']),
     );
   }
 
@@ -136,8 +147,17 @@ class Wire {
   /// and the list caps (12 cuisines, 20 conditions, 40 allergies) are applied
   /// here so a long list is trimmed rather than rejected outright.
   ///
-  /// `is_pregnant` and `pincode` are not sent: the app has no field for either,
-  /// and `PUT` replaces, so `is_pregnant` returns to its default on every save.
+  /// `PUT` replaces the whole record, so what is left out is not "unchanged", it
+  /// is cleared. That cuts both ways and both are deliberate here:
+  ///
+  /// * every answer is sent on every save, including the ones the screen is not
+  ///   editing, so changing the city cannot delete an allergy;
+  /// * a null is dropped by [prune] rather than sent, and the backend's default
+  ///   for a missing key is null too — which is how an answer gets cleared. An
+  ///   empty `goal_types` list is not null, so it is sent, and it means "none".
+  ///
+  /// `is_pregnant` is still not sent: the app has no field for it, so it returns
+  /// to its default on every save. That one is unchanged and still a gap.
   static Map<String, dynamic> profileTo(
     HealthProfile profile, {
     String? displayName,
@@ -170,6 +190,7 @@ class Wire {
       'diet_type': profile.dietType.wire,
       'cuisine_pref': profile.cuisinePrefs.take(12).toList(),
       'city': profile.city,
+      'pincode': profile.pincode,
       'wake_time': normaliseTimeOfDay(profile.wakeTime),
       'sleep_time': normaliseTimeOfDay(profile.sleepTime),
       'meal_times': meals,
@@ -181,21 +202,18 @@ class Wire {
                 'severity': a.severity.wire,
               })
           .toList(),
+      // The goals the wizard's multi-select collected, in the order they were
+      // tapped. The backend writes them to `goals` as the priority order, and
+      // `app/ai/context.py` prints them into the planning prompt in that order.
+      'goal_types':
+          profile.goalTypes.take(8).map((GoalType g) => g.wire).toList(),
+      'hydration_target_override_ml': profile.hydrationTargetOverrideMl,
     });
   }
 
-  /// The backend has no "prefer not to say"; `other` is the honest neighbour.
-  static String _sexOut(Sex sex) {
-    switch (sex) {
-      case Sex.female:
-        return 'female';
-      case Sex.male:
-        return 'male';
-      case Sex.other:
-      case Sex.undisclosed:
-        return 'other';
-    }
-  }
+  /// Every [Sex] the app can hold is a value the backend stores, so this is a
+  /// direct mapping and no longer a translation that loses something.
+  static String _sexOut(Sex sex) => sex.wire;
 
   // ---------------------------------------------------------------- plan
 

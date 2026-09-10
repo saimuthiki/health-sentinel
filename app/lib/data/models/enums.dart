@@ -6,19 +6,33 @@
 /// own switch statement of strings.
 library;
 
+/// The three answers the backend can actually store.
+///
+/// There used to be a fourth, "Prefer not to say". It was never a real option:
+/// `health_profiles.sex` has no such value, so the wire mapping sent it as
+/// `other`, and the next time the profile was read the person's answer had
+/// changed to "Another term" without anybody touching it.
+///
+/// The question itself stays. `app/rules/classify.py` picks lab reference
+/// ranges by sex, and `db/seed/202_reference_ranges.sql` is keyed on it: a
+/// haemoglobin that is normal for a woman is anaemia in a man. Dropping the
+/// question would not decline to answer it, it would make every lab reading
+/// quietly wrong. Only the option that could not survive a reload is gone.
 enum Sex {
   female('female', 'Female'),
   male('male', 'Male'),
-  other('other', 'Another term'),
-  undisclosed('undisclosed', 'Prefer not to say');
+  other('other', 'Another term');
 
   const Sex(this.wire, this.label);
   final String wire;
   final String label;
 
+  /// Anything unrecognised reads as [Sex.other] — including `prefer_not_to_say`,
+  /// which rows written before this change may still carry, and which the
+  /// backend has always read back as `other` too.
   static Sex fromWire(Object? value) => Sex.values.firstWhere(
         (Sex e) => e.wire == value,
-        orElse: () => Sex.undisclosed,
+        orElse: () => Sex.other,
       );
 }
 

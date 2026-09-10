@@ -436,7 +436,9 @@ void main() {
 
     test('an unrecognised wire value falls back rather than throwing', () {
       expect(DietType.fromWire('something_else'), DietType.veg);
-      expect(Sex.fromWire(null), Sex.undisclosed);
+      expect(Sex.fromWire(null), Sex.other);
+      // Rows written before the fourth option was removed still read.
+      expect(Sex.fromWire('prefer_not_to_say'), Sex.other);
       expect(MealSlot.fromWire(42), MealSlot.breakfast);
       expect(ReportStatus.fromWire(''), ReportStatus.uploaded);
     });

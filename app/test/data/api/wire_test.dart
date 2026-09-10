@@ -165,18 +165,22 @@ void main() {
         'conditions',
         'allergies',
         'is_pregnant',
+        'pincode',
+        'goal_types',
+        'hydration_target_override_ml',
       };
       final Map<String, dynamic> body = Wire.profileTo(
         HealthProfile(
           userId: 'u1',
           dob: DateTime(1994, 3, 2),
-          sex: Sex.undisclosed,
+          sex: Sex.other,
           heightCm: 163.5,
           weightKg: 58,
           city: 'Hyderabad',
           pincode: '500081',
           conditions: const <String>['thyroid'],
           goalTypes: const <GoalType>[GoalType.energy],
+          hydrationTargetOverrideMl: 2600,
           allergies: const <Allergy>[
             Allergy(id: 'a1', allergen: 'peanut',
                 severity: AllergySeverity.severe),
@@ -186,16 +190,23 @@ void main() {
         displayName: 'Sai',
       );
       expect(body.keys.toSet().difference(allowed), isEmpty);
-      expect(body.containsKey('pincode'), isFalse);
-      expect(body.containsKey('goal_types'), isFalse);
+      expect(body['pincode'], '500081');
+      expect(body['goal_types'], <String>['energy']);
+      expect(body['hydration_target_override_ml'], 2600);
       expect(body.containsKey('user_id'), isFalse);
     });
 
-    test('"prefer not to say" becomes the sex the backend has a word for', () {
-      final Map<String, dynamic> body = Wire.profileTo(
-        const HealthProfile(userId: 'u1', sex: Sex.undisclosed),
-      );
-      expect(body['sex'], 'other');
+    test('every sex the app can hold is one the backend stores', () {
+      for (final Sex sex in Sex.values) {
+        final Map<String, dynamic> body = Wire.profileTo(
+          HealthProfile(userId: 'u1', sex: sex),
+        );
+        expect(body['sex'], sex.wire);
+        expect(<String>['male', 'female', 'other'], contains(body['sex']));
+      }
+      // The fourth option is gone, so nothing is translated on the way out and
+      // an answer can no longer change itself on the next read.
+      expect(Sex.values.length, 3);
     });
 
     test('times are sent as HH:mm and read back from HH:MM:SS', () {

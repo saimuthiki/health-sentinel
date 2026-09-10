@@ -37,9 +37,11 @@ class ApiRepositoryException extends HealthRepositoryException {
 ///   stripped before anything is written, because a stored red flag shown after
 ///   a failed refresh is a claim about somebody's health right now that nobody
 ///   checked.
-/// * **No number is composed here.** Day nutrient totals, targets, trends and
-///   goals have no endpoint yet, so they come back empty rather than added up
-///   on the phone.
+/// * **No number is composed here.** Day nutrient totals, targets and trends
+///   have no endpoint yet, so they come back empty rather than added up on the
+///   phone. [loadGoals] is still empty for the same reason — the profile now
+///   carries which goals are active, but there is no endpoint returning them as
+///   `Goal` rows with their own ids, titles and progress.
 /// * **No server sentence reaches a screen.** Everything thrown out of here is
 ///   an [ApiRepositoryException] carrying our own copy.
 class HttpHealthRepository implements HealthRepository, CacheAware {
@@ -218,14 +220,12 @@ class HttpHealthRepository implements HealthRepository, CacheAware {
               _pendingDisplayName.isEmpty ? null : _pendingDisplayName,
         ),
       );
-      final HealthProfile saved =
-          Wire.profileFrom(json, userId: profile.userId);
-      // `ProfileOut` carries no goals, so the ones just chosen are kept rather
-      // than dropped on the way back to the wizard.
-      return saved.copyWith(
-        goalTypes: profile.goalTypes,
-        updatedAt: _now(),
-      );
+      // `ProfileOut` now carries the goals and the PIN code back, so what the
+      // screen shows after a save is what the server actually holds — not the
+      // request echoed at the user. If the two ever disagree, the disagreement
+      // is visible, which is the point.
+      return Wire.profileFrom(json, userId: profile.userId)
+          .copyWith(updatedAt: _now());
     } on ApiFailure catch (failure) {
       throw _wrap(failure);
     }

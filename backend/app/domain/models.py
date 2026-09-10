@@ -58,12 +58,19 @@ class HealthProfile(Base):
     diet_type: DietType = DietType.NON_VEG
     cuisine_pref: list[str] = Field(default_factory=list)
     city: str | None = None
+    pincode: str | None = None
     wake_time: time | None = None
     sleep_time: time | None = None
     meal_times: dict[MealSlot, time] = Field(default_factory=dict)
     conditions: list[str] = Field(default_factory=list)
     allergies: list[Allergy] = Field(default_factory=list)
     is_pregnant: bool = False
+
+    #: A water target the person set for themselves, in millilitres, or None when they
+    #: have not. Carried, never interpreted: what a sensible figure is, and what happens
+    #: when it disagrees with the computed target, belongs to the hydration rules and not
+    #: to the profile.
+    hydration_target_override_ml: int | None = None
 
     def age_on(self, on: date) -> int | None:
         """Age in whole years on ``on``, or None if date of birth is unknown."""
