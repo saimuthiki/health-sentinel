@@ -14,6 +14,7 @@ import '../../data/api/api_status.dart';
 import '../../data/models/models.dart';
 import '../../data/providers.dart';
 import '../../data/repository/health_repository.dart';
+import '../activity/activity_card.dart';
 import '../common/consent_routing.dart';
 import '../common/failure_copy.dart';
 import '../common/severity_ui.dart';
@@ -199,11 +200,14 @@ class _TodayBody extends ConsumerWidget {
                 const SizedBox(height: HpSpacing.lg),
                 Container(height: 1, color: p.hairline),
                 const SizedBox(height: HpSpacing.lg),
-                HpMeter(
-                  label: 'Moving',
-                  value: briefing.movementMinutes.toDouble(),
-                  target: briefing.movementTargetMinutes.toDouble(),
-                  unit: 'minutes',
+                // Not a bare meter any more. "Moving: 0 of 43 minutes" named
+                // nothing and gave nobody a way to fill it in; this names the
+                // activity, takes the minutes, and shows the energy that came
+                // of it. The two numbers still come from the same briefing, so
+                // nothing on this screen has two answers to one question.
+                ActivityCard(
+                  minutesToday: briefing.movementMinutes,
+                  targetMinutes: briefing.movementTargetMinutes,
                 ),
               ],
             ),

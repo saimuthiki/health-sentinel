@@ -20,7 +20,18 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
 from app.ai.client import GeminiClient, GeminiError
-from app.api import alerts, auth, chat, feedback, grocery, health, plan, privacy, reports
+from app.api import (
+    activity,
+    alerts,
+    auth,
+    chat,
+    feedback,
+    grocery,
+    health,
+    plan,
+    privacy,
+    reports,
+)
 from app.core.config import ConfigurationError, Settings, get_settings, validate_settings
 from app.core.errors import (
     AppError,
@@ -86,6 +97,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(chat.router)
     app.include_router(plan.router)
     app.include_router(feedback.router)
+    # Named exercise with an energy estimate. It writes the same movement event
+    # feedback.py does, so Today's bar and the weekly read pick these up unchanged.
+    app.include_router(activity.router)
     app.include_router(grocery.router)
     app.include_router(alerts.router)
     app.include_router(privacy.router)
