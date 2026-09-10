@@ -36,6 +36,14 @@ import '../common/failure_copy.dart';
 /// this screen — but it says why, in words, rather than showing a control that
 /// does not work. That rule is in CLAUDE.md: an undismissable finding is not a
 /// preference.
+///
+/// **The words under each row are the server's own.** A reminder's body is
+/// built in `backend/app/planner/alerts.py` from the user's profile and from
+/// curated constants — including the water goal actually in force, which may
+/// be one the person set for themselves. Showing it here is the only way to
+/// see, without waiting for a notification, what a reminder will actually say.
+/// It is rendered verbatim: nothing on this screen writes a sentence about
+/// somebody's health.
 class RemindersScreen extends ConsumerStatefulWidget {
   const RemindersScreen({super.key});
 
@@ -385,6 +393,11 @@ class _RemindersScreenState extends ConsumerState<RemindersScreen> {
           // fires is the truthful half of the two.
           enabled: ofType.any((AlertDefinition alert) => alert.enabled),
           alwaysOn: ofType.any((AlertDefinition alert) => alert.alwaysOn),
+          // The earliest one's words. Every reminder of a kind is derived with
+          // the same body, so the first is the kind's sentence; taking it from
+          // the earliest rather than from whichever row arrived first keeps it
+          // stable when the list is re-fetched.
+          body: ofType.isEmpty ? '' : ofType.first.body,
           times: <String>[
             for (final AlertDefinition alert in ofType) alert.at,
           ],
@@ -417,6 +430,7 @@ class _ReminderGroup {
     required this.enabled,
     required this.alwaysOn,
     required this.times,
+    required this.body,
     required this.allHeldByQuietHours,
   });
 
@@ -430,6 +444,10 @@ class _ReminderGroup {
 
   /// The times of day, 24-hour `HH:mm`, earliest first.
   final List<String> times;
+
+  /// What the reminder says, written by the backend and shown verbatim. Empty
+  /// only if the server sent no body at all.
+  final String body;
 
   /// True when quiet hours cover every reminder of this kind — the backend's
   /// judgement, read off the reply, not worked out here.
@@ -575,6 +593,13 @@ class _ReminderRow extends StatelessWidget {
                   Switch(value: group.enabled, onChanged: onChanged),
               ],
             ),
+            if (group.body.isNotEmpty) ...<Widget>[
+              const SizedBox(height: HpSpacing.md),
+              Text(
+                group.body,
+                style: HpType.reading.copyWith(color: p.inkMuted),
+              ),
+            ],
             if (onChanged == null) ...<Widget>[
               const SizedBox(height: HpSpacing.md),
               Text(
@@ -595,9 +620,19 @@ class _ReminderRow extends StatelessWidget {
   }
 
   /// "8:20 am", or "8:20 am · 11:00 pm" when a kind has more than one time.
+  ///
+  /// Past four times the list stops being readable and starts being a wall:
+  /// water reminders now run every ninety minutes to two hours across a waking
+  /// day, which is eight to ten of them. So a long list is said as a count and
+  /// a span instead — "10 times a day, 7:00 am to 8:30 pm" — which is what
+  /// somebody actually wants to know about a repeating reminder.
   static String _timesLine(List<String> times) {
     if (times.isEmpty) {
       return 'No time set';
+    }
+    if (times.length > 4) {
+      return '${times.length} times a day, ${HpFormat.clockLabel(times.first)} '
+          'to ${HpFormat.clockLabel(times.last)}';
     }
     return times.map(HpFormat.clockLabel).join(' · ');
   }

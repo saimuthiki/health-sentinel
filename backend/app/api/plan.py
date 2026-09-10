@@ -23,14 +23,22 @@ from app.api.deps import (
 )
 from app.api.feedback import movement_minutes_on
 from app.api.guarded import GuardedText, guarded_deterministic
-from app.core.errors import NotFound
+from app.core.errors import NotFound, NotReady, ValidationFailed
 from app.domain.enums import Escalation, MealSlot, SafetyVerdict
 from app.planner.service import PlannerService
 from app.repositories.audit import AuditRepository
 from app.repositories.plans import PlanRepository, plan_item_from_row
 from app.repositories.profiles import ProfileRepository
 from app.repositories.reference import ReferenceRepository
-from app.rules.daily_goals import resolve_hydration_target, resolve_movement_target
+from app.rules.daily_goals import (
+    HYDRATION_CEILING_ML,
+    HYDRATION_OVERRIDE_FIELD,
+    HYDRATION_OVERRIDE_FLOOR_ML,
+    chosen_hydration_ml,
+    judge_hydration_choice,
+    resolve_hydration_target,
+    resolve_movement_target,
+)
 
 router = APIRouter(prefix="/v1/plan", tags=["plan"])
 
@@ -70,6 +78,16 @@ class DayPlanOut(BaseModel):
     #: Citation for the number above, or the reason there is not one. Deterministic text
     #: from curated code; no model has ever touched it.
     hydration_target_source: str = ""
+    #: True when ``hydration_target_ml`` is a goal this person set for themselves rather
+    #: than the one our sources support.
+    hydration_target_chosen_by_user: bool = False
+    #: What the guideline says for this profile, sent **whatever** the person chose, so
+    #: the app can show the evidence beside the choice instead of replacing it.
+    hydration_target_sourced_ml: int | None = None
+    #: The plain warning attached to a chosen goal above the published range: what the
+    #: risk actually is, and that it is worth asking a doctor. Empty when there is nothing
+    #: to say. It warns; it never blocks and never quietly caps.
+    hydration_target_caution: str = ""
     movement_target_minutes_per_day: int | None = None
     #: WHO states the movement target weekly, so this is the number that matters.
     movement_target_minutes_per_week: int | None = None
@@ -87,6 +105,34 @@ class RegenerateIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     plan_date: date | None = None
+
+
+class HydrationTargetIn(BaseModel):
+    """The water goal somebody wants. ``null`` clears it and puts the sourced one back."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    millilitres: int | None = Field(
+        default=None,
+        description=(
+            "The daily drinking-water goal to set, in millilitres, or null to go back to "
+            f"the figure our sources support. Between {HYDRATION_OVERRIDE_FLOOR_ML} and "
+            f"{HYDRATION_CEILING_ML}; above the published range it is accepted with a "
+            "warning, above the ceiling it is refused with the reason."
+        ),
+    )
+
+
+class HydrationTargetOut(BaseModel):
+    """The goal now in force, said back exactly as the Today screen will show it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    hydration_target_ml: int | None = None
+    hydration_target_source: str = ""
+    hydration_target_chosen_by_user: bool = False
+    hydration_target_sourced_ml: int | None = None
+    hydration_target_caution: str = ""
 
 
 @router.get("/today", response_model=DayPlanOut, summary="Today's plan")
@@ -135,6 +181,84 @@ async def regenerate(
         escalation=planned.escalation,
         safety_verdict=planned.verdict,
         generated=True,
+    )
+
+
+@router.put(
+    "/hydration-target",
+    response_model=HydrationTargetOut,
+    summary="Set my own water goal",
+)
+async def set_hydration_target(
+    payload: HydrationTargetIn, profiles: Profiles, audit: Audit
+) -> HydrationTargetOut:
+    """Let this person choose their own daily water goal.
+
+    Three outcomes, all decided by :func:`app.rules.daily_goals.judge_hydration_choice`
+    and none of them by this function:
+
+    * **Refused** -- above the ceiling that module can defend from a citation, below the
+      floor where a goal stops being one, or a large goal on a profile where fluid intake
+      is a doctor's decision. A 422 carrying the reason, and nothing is written.
+    * **Accepted with a warning** -- above the published intake range. The number is
+      stored *exactly as typed*: no cap, no rounding, no silent substitution. The warning
+      comes back in ``hydration_target_caution`` for the app to show, and is written to
+      the audit trail with the figure, so what was chosen and what was said about it can
+      be reviewed later.
+    * **Accepted** -- stored, nothing to say.
+
+    The goal lives on the health profile, in the optional ``hydration_target_override_ml``
+    field. This endpoint owns the *decision*; it does not own the profile contract, so it
+    checks the field exists before writing and checks the value came back after writing
+    rather than reporting a success it did not verify.
+    """
+    profile = await profiles.health_profile()
+    verdict = judge_hydration_choice(profile, payload.millilitres)
+    if not verdict.accepted:
+        # Recorded as well as refused. A refusal is a thing the person tried to do to
+        # their own health, and the trail a clinician reads should have it in.
+        await audit.event(
+            "hydration_target_refused",
+            {"asked_ml": payload.millilitres, "reason": verdict.reason},
+        )
+        raise ValidationFailed(verdict.reason)
+
+    if HYDRATION_OVERRIDE_FIELD not in type(profile).model_fields:
+        raise NotReady(
+            "Setting your own water goal is not available in this version yet. Your goal "
+            "has not been changed, and the figure on your Today screen is still the one "
+            "our sources support."
+        )
+
+    saved = await profiles.save_health_profile(
+        profile.model_copy(update={HYDRATION_OVERRIDE_FIELD: verdict.millilitres})
+    )
+    if chosen_hydration_ml(saved) != verdict.millilitres:
+        # The field exists on the model but did not survive the round trip -- a column or
+        # a mapping is missing underneath us. Saying "saved" here would be a lie the user
+        # would only discover by watching the bar not move.
+        raise NotReady(
+            "Your water goal could not be stored just now, so nothing has changed. "
+            "Please try again in a moment."
+        )
+
+    target = resolve_hydration_target(saved)
+    await audit.event(
+        "hydration_target_set",
+        {
+            "millilitres": verdict.millilitres,
+            "sourced_ml": target.sourced_millilitres,
+            # The warning exactly as it was put in front of the person, not a flag saying
+            # one was shown. GAPS.md G20 asks a clinician to review these.
+            "caution_shown": verdict.caution,
+        },
+    )
+    return HydrationTargetOut(
+        hydration_target_ml=target.millilitres,
+        hydration_target_source=target.source,
+        hydration_target_chosen_by_user=target.chosen_by_user,
+        hydration_target_sourced_ml=target.sourced_millilitres,
+        hydration_target_caution=verdict.caution or target.caution,
     )
 
 
@@ -218,6 +342,9 @@ async def _daily_goals(
     return {
         "hydration_target_ml": hydration.millilitres,
         "hydration_target_source": hydration.source,
+        "hydration_target_chosen_by_user": hydration.chosen_by_user,
+        "hydration_target_sourced_ml": hydration.sourced_millilitres,
+        "hydration_target_caution": hydration.caution,
         "movement_target_minutes_per_day": movement.minutes_per_day,
         "movement_target_minutes_per_week": movement.minutes_per_week,
         "movement_target_source": movement.source,

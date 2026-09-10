@@ -262,3 +262,171 @@ WHO's muscle-strengthening recommendation (2+ days a week) is not modelled at al
 
 **Needed:** a decision on how the 150–300 range should be allocated, and the 5–17 band
 if the product ever stops being adults-only.
+
+### G17 — Every MET value in the activity list is unchecked against the printed Compendium
+`app/rules/activity_energy.py` → `ACTIVITIES`
+
+The energy figure the app now shows ("about 290 kcal for 45 minutes of badminton") is
+`MET × body weight in kg × hours`. The MET values come from the 2011 Compendium of
+Physical Activities (Ainsworth et al., *Med Sci Sports Exerc* 2011;43(8):1575–1581),
+and each row in `ACTIVITIES` carries the Compendium's own activity code and its own
+wording of the activity so that any of them can be looked up in one step.
+
+**They were written from recall of that source, not read off it.** Network access to the
+Compendium was blocked in the session that added them, and none of the eleven has been
+compared with the published table. So each value is a citation of a real published
+number that has not been verified here — which is a different and weaker claim than
+every other cited number in this engine makes, and it is the reason this item exists
+rather than the values simply shipping.
+
+The ten to check, with what the code currently claims:
+
+| Key | Code | MET | Compendium wording as stored |
+|---|---|---|---|
+| `badminton` | 15030 | 5.5 | badminton, social singles and doubles, general |
+| `running` | 12050 | 9.8 | running, 6 mph (10 min/mile) |
+| `walking` | 17190 | 3.5 | walking, 3.0 mph, level, moderate pace, firm surface |
+| `cycling` | 01040 | 8.0 | bicycling, 12–13.9 mph, leisure, moderate effort |
+| `gym_strength` | 02054 | 3.5 | resistance (weight) training, multiple exercises, 8–15 repetitions |
+| `yoga` | 02150 | 2.5 | yoga, Hatha |
+| `swimming` | 18240 | 5.8 | swimming laps, freestyle, front crawl, slow, moderate or light effort |
+| `cricket` | 15200 | 4.8 | cricket, batting, bowling, fielding |
+| `stairs` | 17133 | 4.0 | stair climbing, slow pace |
+| `housework` | 05040 | 3.3 | cleaning, sweeping carpet or floors, general |
+
+One of these carries more weight than the others: `yoga` at 2.5 METs is **below** the
+3.0 MET line, which is why `counts_toward_target` is false for it and an hour of yoga
+does not move the WHO bar. If the real figure is 3.0 or above, that behaviour is wrong,
+not just the number.
+
+**Needed:** each row checked against the printed 2011 Compendium and corrected or
+confirmed. Until that is done the list is defensible — every figure names a real source
+and can be traced — but it is not verified, and nothing in the tests can make it so.
+
+### G18 — A MET figure is a population average, and the formula is gross not net
+`app/rules/activity_energy.py` → `energy_kcal`, `ENERGY_IS_AN_ESTIMATE`
+
+Two limits are built into this arithmetic and neither can be removed by better data
+entry. Both are stated to the user in `ENERGY_IS_AN_ESTIMATE`, which the API sends
+alongside every figure so the number cannot be shown without them.
+
+- **It is not a measurement of this person.** A MET value is the average energy cost of
+  an activity measured on a group of other people. Fitness, technique, effort, terrain,
+  heat and body composition all move the real figure and none of them is an input here.
+  Two people of the same weight playing the same hour of badminton do not spend the same
+  energy. The app must therefore never present this as an observation — "about 290 kcal,
+  an estimate" is honest, "you burned 290 kcal" is not.
+- **It is gross, not net.** `MET × kg × hours` is the *total* energy used during the
+  session, which includes the roughly 1 MET the body would have spent lying still for the
+  same minutes. The extra energy attributable to the exercise is nearer
+  `(MET − 1) × kg × hours` — for a one-hour 3.5 MET walk that is a 29% difference. Gross
+  is what the Compendium's own formula gives and what comparable apps show, so it is what
+  ships, with the inclusion said out loud rather than glossed.
+
+A third, smaller one: the MET is defined against 3.5 mL O₂/kg/min, a figure derived from
+a reference adult. It is known to overestimate for people well above that reference
+weight and underestimate below it. No correction is applied because we hold no citable
+one.
+
+**Needed:** a decision, ideally from a dietitian, on whether the app should show net
+rather than gross energy, and a sourced correction for the reference-weight bias if one
+exists. Neither is a bug in the current arithmetic; both change what the number means.
+
+### G19 — "Calories burnt till date" is bounded by the audit trail's row limit
+`app/api/activity.py` → `TRAIL_ROW_LIMIT`, `ActivityTotalsOut.truncated`
+
+The lifetime total is folded from `health_events`, which is read through
+`AuditRepository.events_since`. That method takes a row limit (500) and orders
+**ascending**, so a user with more than 500 logged sessions of one event type would have
+their *newest* sessions dropped from the read — the opposite of what anybody would
+expect, and it would silently make today's figures wrong as well.
+
+What the code does about it today: the lifetime read reports `truncated: true` when it
+comes back full, so the app says "at least" rather than a flat total, and today and this
+week are re-read over a 31-day window in that case so those two stay exact. Nothing is
+under-reported without saying so.
+
+What it does not do is fix the underlying limit, because that needs either a paging read
+or an aggregate on `health_events`, and `app/repositories/` was not this change's to
+edit. At one session a day, 500 rows is about sixteen months.
+
+**Needed:** a paged or aggregating read on `AuditRepository` — or, better, the movement
+table that `app/api/feedback.py` notes does not exist — so that "till date" needs no
+asterisk.
+
+### G20 — A water goal the user sets for themselves, and the two numbers that fence it in
+`app/rules/daily_goals.py` → `HYDRATION_CAUTION_ABOVE_ML`, `HYDRATION_CEILING_ML`,
+`HYDRATION_OVERRIDE_FLOOR_ML`, `judge_hydration_choice()`
+
+The owner asked to set his own water goal, and named **5 litres a day**. He trains hard,
+daily, in Hyderabad. That is the exact profile in which exercise-associated hyponatraemia
+happens: sustained high intake, heavy sweating, and a fixed target drunk to regardless of
+thirst. It has killed athletes.
+
+Refusing him outright is not the product's call to make about his own body, and quietly
+capping him at a number he did not choose is worse — he would believe he was drinking 5 L
+while the bar measured something else. So `resolve_hydration_target()` now takes an
+optional `hydration_target_override_ml` off the profile and uses it, with the sourced
+figure carried alongside it in `sourced_millilitres` and named in `source`, so the
+evidence is always on screen next to the choice.
+
+Three numbers were needed, and only one of them has a guideline behind it:
+
+- **Warn above 3000 mL** (`HYDRATION_CAUTION_ABOVE_ML`). The highest adult adequate
+  intake for *total* water in the sources we hold is IOM 2005's 3.7 L/day for men, and
+  IOM attributes 75–84% of total water to drinks — a beverage share of roughly 2.8–3.1 L.
+  3000 mL is the round figure just inside the top of that band, so the warning begins
+  slightly before the published range runs out. Above it the app says, in plain words,
+  that too much water dilutes the salt in the blood, that the risk is higher when
+  sweating heavily, and that it is worth asking a doctor. It **warns**; it does not
+  block, cap or round.
+  *Citations:* Institute of Medicine (US) Panel on Dietary Reference Intakes for
+  Electrolytes and Water. *Dietary Reference Intakes for Water, Potassium, Sodium,
+  Chloride, and Sulfate.* Washington, DC: The National Academies Press; 2005. —
+  Hew-Butler T, Rosner MH, Fowkes-Godek S, et al. Statement of the Third International
+  Exercise-Associated Hyponatremia Consensus Development Conference, Carlsbad,
+  California, 2015. *Clin J Sport Med.* 2015;25(4):303–320.
+
+- **Refuse above 6000 mL** (`HYDRATION_CEILING_ML`). **This figure is ours, not a
+  guideline's, and that is the gap.** No body publishes a daily maximum for water: IOM
+  2005 deliberately set *no* Tolerable Upper Intake Level, on the grounds that healthy
+  kidneys excrete the excess. The one hard number in the literature is the rate, not the
+  daily total: Noakes et al. measured peak urine flow of about 735–970 mL/hour in healthy
+  adults during oral fluid overload and concluded that intake much faster than that
+  cannot be cleared. 6000 mL spread over the 16 waking hours this app schedules reminders
+  in is 375 mL/hour — about **half** the slowest of those measured peaks. Half rather than
+  the rate itself, because a peak diuresis measured under maximal stimulation is not a
+  rate anyone sustains for a day, and because dilutional hyponatraemia occurs well below
+  maximal renal clearance once exercise and heat are stimulating ADH. It is the most
+  generous ceiling we are prepared to defend out loud, not a safe amount.
+  *Citation:* Noakes TD, Wilson G, Gray DA, Lambert MI, Dennis SC. Peak rates of diuresis
+  in healthy humans during oral fluid overload. *S Afr Med J.* 2001;91(10):852–857.
+
+- **Refuse below 500 mL** (`HYDRATION_OVERRIDE_FLOOR_ML`). Not clinical at all, and
+  labelled as such in the code and in the refusal text: it is the point below which a
+  daily goal stops being a goal.
+
+Two interactions were decided here rather than left to whoever reads this next:
+
+- **A profile we hold no water figure for** — pregnancy, a fluid-restricting condition,
+  under 18 — cannot set a goal above 3000 mL at all: `judge_hydration_choice()` refuses
+  it and the refusal carries the existing "ask your doctor" text. A smaller figure is
+  stored but never shown, and the person is told it is not being shown. The reason for
+  refusing rather than warning is that a stored high goal on a restricted profile becomes
+  live the day the condition is edited off the profile, which is a hazard with a delay
+  on it. The existing behaviour is otherwise untouched: those profiles still get **no**
+  target and a reason, never a default and never a number they typed.
+- **A goal already stored that is outside the envelope** — written by any path, including
+  one this module does not own — is ignored on read in favour of the sourced figure, with
+  the reason appended to `source`. The check runs on the way out as well as on the way in.
+
+Every choice and every warning shown is also written to the audit trail by
+`app/api/plan.py` (`hydration_target_set` with the millilitres, the sourced figure and
+the exact caution text; `hydration_target_refused` with what was asked for and why it was
+refused), so a clinician can review what a person set and what they were told.
+
+**Needed:** a clinician to confirm or replace the 3000 mL warning threshold and — much
+more importantly — the 6000 mL ceiling, which is a construction of ours from a measured
+hourly rate and not a published daily limit. Also worth deciding: whether a profile that
+records daily hard training in a hot climate should warn *earlier* than 3000 mL rather
+than later, since that is the population in which the harm is documented.
