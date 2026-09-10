@@ -15,6 +15,9 @@ import '../../data/repository/health_repository.dart';
 import '../common/consent_routing.dart';
 import '../common/failure_copy.dart';
 import '../common/severity_ui.dart';
+import 'day_routine.dart';
+import 'hydration_card.dart';
+import 'scannable_note.dart';
 
 /// The screen people open every morning.
 ///
@@ -23,6 +26,11 @@ import '../common/severity_ui.dart';
 /// The product is the loop, and the loop happens at particular hours, so the
 /// hours are the structure. Everything else on the screen stays deliberately
 /// quiet so that the ribbon, and any escalation above it, are what the eye finds.
+///
+/// The ribbon is a *routine*, not a feed of plan rows: waking, movement,
+/// breakfast, the day's meals with water between them, and winding down. What
+/// belongs at each hour is worked out in `day_routine.dart`; this file is only
+/// the drawing of it.
 class TodayScreen extends ConsumerWidget {
   const TodayScreen({super.key});
 
@@ -122,6 +130,11 @@ class _TodayBody extends ConsumerWidget {
     final HealthRepository repository = ref.watch(healthRepositoryProvider);
     final DateTime? cachedAt = _servedFromCacheAt(repository);
 
+    // Meals, not plan rows. Four things to choose between at lunch is one
+    // lunch, and the heading has to count the same way the ribbon does or the
+    // screen contradicts itself in the first two lines.
+    final int mealCount = groupMealsBySlot(briefing).length;
+
     return RefreshIndicator(
       onRefresh: () async => ref.invalidate(todayProvider),
       child: ListView(
@@ -170,56 +183,18 @@ class _TodayBody extends ConsumerWidget {
 
           HpSectionHeader(
             title: 'Your day',
-            note: '${briefing.meals.length} planned',
+            note: mealCount == 1 ? '1 meal planned' : '$mealCount meals planned',
           ),
-          HpDayTimeline(entries: _timelineFor(briefing, now)),
+          HpDayTimeline(entries: _timelineFor(context, briefing, now)),
           const SizedBox(height: HpSpacing.section),
 
           HpCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                HpMeter(
-                  label: 'Water so far',
-                  value: briefing.hydrationMl,
-                  target: briefing.hydrationTargetMl,
-                  unit: 'ml',
-                  footnote: 'A glass every couple of hours is easier than '
-                      'catching up at night.',
-                ),
-                const SizedBox(height: HpSpacing.lg),
-                Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: HpButton(
-                        label: 'Add a glass',
-                        tone: HpButtonTone.secondary,
-                        icon: Icons.add_rounded,
-                        onPressed: () async {
-                          final ScaffoldMessengerState messenger =
-                              ScaffoldMessenger.of(context);
-                          try {
-                            await ref
-                                .read(healthRepositoryProvider)
-                                .logHydration(250);
-                            ref.invalidate(todayProvider);
-                          } catch (error) {
-                            messenger.showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  explainFailure(
-                                    error,
-                                    fallback: 'That glass could not be saved '
-                                        'just now. Try again in a moment.',
-                                  ),
-                                ),
-                              ),
-                            );
-                          }
-                        },
-                      ),
-                    ),
-                  ],
+                HydrationControls(
+                  loggedMl: briefing.hydrationMl,
+                  targetMl: briefing.hydrationTargetMl,
                 ),
                 const SizedBox(height: HpSpacing.lg),
                 Container(height: 1, color: p.hairline),
@@ -250,19 +225,14 @@ class _TodayBody extends ConsumerWidget {
           if (briefing.planRationale != null)
             HpCard(
               tone: HpCardTone.tinted,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    'Why today looks like this',
-                    style: HpType.bodyStrong.copyWith(color: p.ink),
-                  ),
-                  const SizedBox(height: HpSpacing.sm),
-                  Text(
-                    briefing.planRationale!,
-                    style: HpType.reading.copyWith(color: p.inkMuted),
-                  ),
-                ],
+              child: ScannableNote(
+                // Calm, and said in the app's own words rather than a severity
+                // word: this card is not a finding, it is the reason today
+                // looks the way it does.
+                severity: HpSeverity.calm,
+                chipLabel: 'Today’s plan',
+                title: 'Why today looks like this',
+                body: briefing.planRationale!,
               ),
             ),
         ],
@@ -312,46 +282,25 @@ class _TodayBody extends ConsumerWidget {
     );
   }
 
+  /// The routine, drawn as the ribbon.
+  ///
+  /// The only thing decided here is what a row *does*; what the rows are is
+  /// [buildDayRoutine]'s job. A meal opens the plan, because "what exactly are
+  /// my four lunch options" is the next question after seeing that there are
+  /// four of them, and the plan is where they are written out with the reason
+  /// each one is there.
   static List<HpTimelineEntry> _timelineFor(
+    BuildContext context,
     TodayBriefing briefing,
     DateTime now,
   ) {
+    final List<DayMoment> moments = buildDayRoutine(briefing);
     final int minutesNow = now.hour * 60 + now.minute;
-    final List<_Moment> moments = <_Moment>[
-      _Moment(
-        time: briefing.wakeTime,
-        title: 'Wake up',
-        detail: 'Fifteen minutes of morning light helps your vitamin D.',
-        icon: Icons.wb_sunny_outlined,
-      ),
-      for (final MealPlanItem meal in briefing.meals)
-        _Moment(
-          time: meal.timeOfDay ?? meal.mealSlot.defaultTime,
-          title: meal.title,
-          detail: meal.portion,
-          icon: Icons.restaurant_outlined,
-        ),
-      _Moment(
-        time: '18:30',
-        title: 'A walk',
-        detail: '${briefing.movementTargetMinutes} minutes is the target today.',
-        icon: Icons.directions_walk_rounded,
-      ),
-      _Moment(
-        time: briefing.sleepTime,
-        title: 'Wind down',
-        detail: 'Screens away thirty minutes before this.',
-        icon: Icons.bedtime_outlined,
-      ),
-    ]..sort(
-        (_Moment a, _Moment b) => HpFormat.minutesOfDay(a.time)
-            .compareTo(HpFormat.minutesOfDay(b.time)),
-      );
 
     // "Now" is the next thing that has not happened yet, which is the question
     // someone actually opens the app to answer.
     int nowIndex = moments.indexWhere(
-      (_Moment m) => HpFormat.minutesOfDay(m.time) >= minutesNow,
+      (DayMoment moment) => moment.minutesOfDay >= minutesNow,
     );
     if (nowIndex < 0) {
       nowIndex = moments.length - 1;
@@ -369,23 +318,12 @@ class _TodayBody extends ConsumerWidget {
               : (i == nowIndex
                   ? HpTimelineState.now
                   : HpTimelineState.upcoming),
+          onTap: moments[i].kind == DayMomentKind.meal
+              ? () => GoRouter.of(context).go('/plan')
+              : null,
         ),
     ];
   }
-}
-
-class _Moment {
-  const _Moment({
-    required this.time,
-    required this.title,
-    required this.icon,
-    this.detail,
-  });
-
-  final String time;
-  final String title;
-  final String? detail;
-  final IconData icon;
 }
 
 class _FocusCard extends StatelessWidget {
@@ -395,29 +333,20 @@ class _FocusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final HpPalette p = context.hp;
-    final HpSeverity severity = note.tone.severity;
-
     return HpCard(
       onTap: note.linkedBiomarker == null
           ? null
           : () => GoRouter.of(context).go('/reports'),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          HpStatusChip(severity: severity, dense: true),
-          const SizedBox(height: HpSpacing.md),
-          Text(note.title, style: HpType.headline.copyWith(color: p.ink)),
-          const SizedBox(height: HpSpacing.sm),
-          Text(note.body, style: HpType.reading.copyWith(color: p.inkMuted)),
-          if (note.actionLabel != null) ...<Widget>[
-            const SizedBox(height: HpSpacing.sm),
-            HpTextAction(
-              label: note.actionLabel!,
-              onPressed: () => GoRouter.of(context).go('/reports'),
-            ),
-          ],
-        ],
+      child: ScannableNote(
+        severity: note.tone.severity,
+        title: note.title,
+        body: note.body,
+        action: note.actionLabel == null
+            ? null
+            : HpTextAction(
+                label: note.actionLabel!,
+                onPressed: () => GoRouter.of(context).go('/reports'),
+              ),
       ),
     );
   }
