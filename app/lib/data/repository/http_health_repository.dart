@@ -502,6 +502,49 @@ class HttpHealthRepository implements HealthRepository, CacheAware {
     }
   }
 
+  // --------------------------------------------------------------- grocery
+
+  /// `GET /v1/grocery` — the current week, as the backend decides which week
+  /// that is.
+  ///
+  /// No `week_start` is sent: the endpoint defaults to the week containing
+  /// today, and a phone that worked out its own Monday would eventually
+  /// disagree with the server about which week it is standing in.
+  ///
+  /// Not cached, unlike Today and the plan. A shopping list read out of a cache
+  /// would show ticks that may since have changed on another device, and the
+  /// harm of that — believing a thing is already in the kitchen when it is not
+  /// — is exactly the harm this feature exists to prevent.
+  @override
+  Future<GroceryList> loadGroceryList() async {
+    try {
+      return GroceryList.fromJson(await _api.getMap('/v1/grocery'));
+    } on ApiFailure catch (failure) {
+      throw _wrap(failure);
+    }
+  }
+
+  /// `PATCH /v1/grocery/items/{item_id}` with the one field `StateIn` allows.
+  ///
+  /// The reply is read for its `state` and nothing else. See the interface for
+  /// why: the endpoint composes its answer without the name lookup, so every
+  /// other field on it is either unchanged or blank.
+  @override
+  Future<GroceryState> setGroceryItemState({
+    required String itemId,
+    required GroceryState state,
+  }) async {
+    try {
+      final Map<String, dynamic> json = await _api.patchMap(
+        '/v1/grocery/items/${Uri.encodeComponent(itemId)}',
+        body: <String, dynamic>{'state': state.wire},
+      );
+      return GroceryState.fromWire(json['state']);
+    } on ApiFailure catch (failure) {
+      throw _wrap(failure);
+    }
+  }
+
   /// No endpoint yet. An empty list is the truthful answer; a plausible one
   /// made up on the client is not.
   @override

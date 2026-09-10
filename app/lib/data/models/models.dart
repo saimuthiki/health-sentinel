@@ -1,5 +1,6 @@
 export 'conversation.dart';
 export 'enums.dart';
+export 'grocery.dart';
 export 'json.dart';
 export 'plan.dart';
 export 'profile.dart';

@@ -78,6 +78,33 @@ abstract class HealthRepository {
     required bool done,
   });
 
+  /// This week's shopping list, grouped into aisles by the backend.
+  ///
+  /// `GET /v1/grocery` builds the list the first time it is asked for by adding
+  /// up the portions of the meals already planned for that week. So it is
+  /// derived from the plan — which is itself built from the profile, the lab
+  /// findings and the food preferences — and not a fixed list of healthy
+  /// things. Nothing is invented here or on the server: a week with no planned
+  /// days answers with no items, and that is the honest answer.
+  Future<GroceryList> loadGroceryList();
+
+  /// Say whether one line is needed, already at home, or bought.
+  ///
+  /// `PATCH /v1/grocery/items/{item_id}` carries the single field `StateIn`
+  /// allows, and that model is declared `extra="forbid"`, so anything else is a
+  /// 422 rather than something quietly dropped.
+  ///
+  /// Only the state comes back, deliberately. The endpoint answers with a
+  /// `GroceryItemOut` built without the reference-table lookup the read does,
+  /// so its `name` is always the empty string; a caller handed that whole
+  /// object would sooner or later use it to redraw the line and blank the
+  /// label. Returning the one field the reply can be trusted for makes that
+  /// mistake impossible to make.
+  Future<GroceryState> setGroceryItemState({
+    required String itemId,
+    required GroceryState state,
+  });
+
   Future<List<Goal>> loadGoals();
 
   Future<List<BiomarkerTrend>> loadTrends();

@@ -311,6 +311,55 @@ class FakeHealthRepository implements HealthRepository {
     await _settle<void>(null);
   }
 
+  /// This week's list, with any ticks made in this session still on it.
+  ///
+  /// The sample lines are what a week of [_sampleMeals] actually adds up to,
+  /// with the aisles written as the backend writes them — `cereal_millet`, not
+  /// "Cereals and millets". That matters: the aisle is a `foods.food_group`
+  /// value, so a screen built against a fake that pre-prettified it would look
+  /// right here and show `pulse_legume` on a phone.
+  @override
+  Future<GroceryList> loadGroceryList() {
+    return _settle(
+      GroceryList(
+        weekStart: _sampleWeekStart,
+        items: <GroceryItem>[
+          for (final GroceryItem item in _sampleGroceries)
+            groceryStates.containsKey(item.id)
+                ? item.withState(groceryStates[item.id]!)
+                : item,
+        ],
+      ),
+    );
+  }
+
+  /// Record the state, the way `PATCH /v1/grocery/items/{item_id}` does.
+  ///
+  /// Including the refusal for an item that is not on the list: the real
+  /// endpoint answers "That item does not exist, or is not yours" rather than
+  /// quietly succeeding, and a fake that accepted anything would let a screen
+  /// be built on a promise the server does not keep.
+  @override
+  Future<GroceryState> setGroceryItemState({
+    required String itemId,
+    required GroceryState state,
+  }) async {
+    final bool known =
+        _sampleGroceries.any((GroceryItem item) => item.id == itemId);
+    if (!known) {
+      throw const HealthRepositoryException(
+        'That item is not on this week’s list any more. Open the list again to '
+        'see what it says now.',
+      );
+    }
+    groceryStates[itemId] = state;
+    return _settle(state);
+  }
+
+  /// What has been ticked, by grocery item id. Newest write wins, as on the
+  /// server: the row carries one state, not a history.
+  final Map<String, GroceryState> groceryStates = <String, GroceryState>{};
+
   @override
   Future<List<Goal>> loadGoals() => _settle(_sampleGoals);
 
@@ -770,6 +819,86 @@ class FakeHealthRepository implements HealthRepository {
           sourceCitation: 'ATA reference interval, adults',
         ),
       ],
+    ),
+  ];
+
+  /// The Monday the sample list runs from.
+  static final DateTime _sampleWeekStart = DateTime(2026, 9, 7);
+
+  /// A week of [_sampleMeals], added up. Quantities carry the tenth the
+  /// planner adds on top, which is why none of them is a round number.
+  static final List<GroceryItem> _sampleGroceries = <GroceryItem>[
+    const GroceryItem(
+      id: 'gi1',
+      foodId: 'ragi_flour',
+      name: 'Ragi flour',
+      quantity: 616,
+      aisle: 'cereal_millet',
+    ),
+    const GroceryItem(
+      id: 'gi2',
+      foodId: 'rice_brown',
+      name: 'Rice, brown',
+      quantity: 1155,
+      aisle: 'cereal_millet',
+    ),
+    const GroceryItem(
+      id: 'gi3',
+      foodId: 'wheat_flour_atta',
+      name: 'Wheat flour, wholemeal (atta)',
+      quantity: 462,
+      aisle: 'cereal_millet',
+      // Already in the kitchen, so the sample screen shows both states.
+      state: GroceryState.have,
+    ),
+    const GroceryItem(
+      id: 'gi4',
+      foodId: 'rajma',
+      name: 'Kidney beans (rajma)',
+      quantity: 539,
+      aisle: 'pulse_legume',
+    ),
+    const GroceryItem(
+      id: 'gi5',
+      foodId: 'chana_roasted',
+      name: 'Chana, roasted',
+      quantity: 231,
+      aisle: 'pulse_legume',
+    ),
+    const GroceryItem(
+      id: 'gi6',
+      foodId: 'spinach',
+      name: 'Spinach (palak)',
+      quantity: 770,
+      aisle: 'leafy_vegetable',
+    ),
+    const GroceryItem(
+      id: 'gi7',
+      foodId: 'beetroot',
+      name: 'Beetroot',
+      quantity: 616,
+      aisle: 'vegetable',
+    ),
+    const GroceryItem(
+      id: 'gi8',
+      foodId: 'guava',
+      name: 'Guava',
+      quantity: 1078,
+      aisle: 'fruit',
+    ),
+    const GroceryItem(
+      id: 'gi9',
+      foodId: 'paneer',
+      name: 'Paneer',
+      quantity: 385,
+      aisle: 'dairy',
+    ),
+    const GroceryItem(
+      id: 'gi10',
+      foodId: 'almond',
+      name: 'Almonds',
+      quantity: 62,
+      aisle: 'nut_seed',
     ),
   ];
 
