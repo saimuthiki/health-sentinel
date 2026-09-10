@@ -8,6 +8,8 @@ import '../../core/theme/hp_typography.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/models/models.dart';
 import '../../data/providers.dart';
+import '../common/api_waking_notice.dart';
+import '../common/failure_copy.dart';
 
 class SignUpScreen extends ConsumerStatefulWidget {
   const SignUpScreen({super.key});
@@ -140,19 +142,32 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                       },
                     ),
                   ),
+                  const ApiWakingNotice(),
                   if (error != null) ...<Widget>[
                     Padding(
                       padding: const EdgeInsets.only(bottom: HpSpacing.lg),
-                      child: Text(
-                        error.toString(),
-                        style: HpType.label.copyWith(color: p.urgentInk),
+                      child: Semantics(
+                        liveRegion: true,
+                        container: true,
+                        child: Text(
+                          // Our own sentence, never the exception's. The
+                          // "there is already an account with that email"
+                          // copy comes from `services/auth_service.dart`.
+                          explainFailure(
+                            error,
+                            fallback: 'We could not create the account just '
+                                'now. Nothing was lost - try again in a '
+                                'moment.',
+                          ),
+                          style: HpType.label.copyWith(color: p.urgentInk),
+                        ),
                       ),
                     ),
                   ],
                   HpButton(
                     label: 'Create account',
                     busy: session.isLoading,
-                    onPressed: _submit,
+                    onPressed: session.isLoading ? null : _submit,
                   ),
                 ],
               ),

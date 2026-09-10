@@ -12,6 +12,7 @@ import '../../data/api/api_status.dart';
 import '../../data/models/models.dart';
 import '../../data/providers.dart';
 import '../../data/repository/health_repository.dart';
+import '../common/consent_routing.dart';
 import '../common/failure_copy.dart';
 import '../common/severity_ui.dart';
 
@@ -63,15 +64,38 @@ class TodayScreen extends ConsumerWidget {
                 // consent or an expired sign-in says so instead of every
                 // failure reading as "no signal". It is still our copy: no
                 // server string reaches this screen.
-                error: (Object error, StackTrace stack) => HpErrorState(
-                  title: 'Today could not be loaded',
-                  body: explainFailure(
+                error: (Object error, StackTrace stack) {
+                  // A missing consent is not a failure to retry, it is a step
+                  // that was never finished, so the action is the consent
+                  // screen rather than "try again" - which would fail again,
+                  // for ever, with no way out of the tab.
+                  final String? consentRoute = consentRouteFor(
                     error,
-                    fallback: 'The app could not reach the health engine. '
-                        'Your data is safe.',
-                  ),
-                  onRetry: () => ref.invalidate(todayProvider),
-                ),
+                    consentAlreadyRecorded: false,
+                  );
+                  if (consentRoute != null) {
+                    return HpErrorState(
+                      title: 'One step is still open',
+                      body: explainFailure(
+                        error,
+                        fallback: 'We still need your agreement to the consent '
+                            'notice before anything about your health is '
+                            'looked at.',
+                      ),
+                      retryLabel: 'Read it and agree',
+                      onRetry: () => GoRouter.of(context).go(consentRoute),
+                    );
+                  }
+                  return HpErrorState(
+                    title: 'Today could not be loaded',
+                    body: explainFailure(
+                      error,
+                      fallback: 'The app could not reach the health engine. '
+                          'Your data is safe.',
+                    ),
+                    onRetry: () => ref.invalidate(todayProvider),
+                  );
+                },
                 data: (TodayBriefing briefing) =>
                     _TodayBody(briefing: briefing),
               ),
@@ -172,10 +196,26 @@ class _TodayBody extends ConsumerWidget {
                         tone: HpButtonTone.secondary,
                         icon: Icons.add_rounded,
                         onPressed: () async {
-                          await ref
-                              .read(healthRepositoryProvider)
-                              .logHydration(250);
-                          ref.invalidate(todayProvider);
+                          final ScaffoldMessengerState messenger =
+                              ScaffoldMessenger.of(context);
+                          try {
+                            await ref
+                                .read(healthRepositoryProvider)
+                                .logHydration(250);
+                            ref.invalidate(todayProvider);
+                          } catch (error) {
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  explainFailure(
+                                    error,
+                                    fallback: 'That glass could not be saved '
+                                        'just now. Try again in a moment.',
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
                         },
                       ),
                     ),

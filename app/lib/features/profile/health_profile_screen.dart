@@ -10,6 +10,8 @@ import '../../core/theme/hp_typography.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/models/models.dart';
 import '../../data/providers.dart';
+import '../common/api_waking_notice.dart';
+import '../common/failure_copy.dart';
 
 /// Setting up the health profile, in six short steps.
 ///
@@ -56,6 +58,9 @@ class _HealthProfileScreenState extends ConsumerState<HealthProfileScreen> {
   int _step = 1;
   bool _saving = false;
 
+  /// The last refusal from the profile save, in our own words, or null.
+  String? _error;
+
   final TextEditingController _height = TextEditingController();
   final TextEditingController _weight = TextEditingController();
   final TextEditingController _city = TextEditingController();
@@ -77,10 +82,15 @@ class _HealthProfileScreenState extends ConsumerState<HealthProfileScreen> {
       ref.read(profileWizardProvider.notifier);
 
   void _next() {
+    if (_saving) {
+      return;
+    }
     _commitTextFields();
     if (_step < _totalSteps) {
       setState(() => _step += 1);
     } else {
+      // Deliberately not awaited: this is a button callback, and _save owns
+      // both the busy flag and every failure it can produce.
       _save();
     }
   }
@@ -103,13 +113,44 @@ class _HealthProfileScreenState extends ConsumerState<HealthProfileScreen> {
     );
   }
 
+  /// Save the profile, and go on **only** if it was actually saved.
+  ///
+  /// Same shape as the consent screen, and for the same reason: this is the
+  /// second call a new account makes, it can arrive while the free host is
+  /// still waking, and a spinner that never stops on the last step of a
+  /// six-step form is how somebody decides the app is broken and force-quits.
+  /// The busy flag is cleared in a `finally`, the failure is shown in our own
+  /// words, and the wizard keeps every answer so "try again" costs one tap.
   Future<void> _save() async {
-    setState(() => _saving = true);
-    await _wizard.save();
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+
+    String? failure;
+    try {
+      await _wizard.save();
+    } catch (error) {
+      failure = explainFailure(
+        error,
+        fallback: 'Your profile could not be saved just now. Everything you '
+            'typed is still here - try again in a moment.',
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _error = failure;
+        });
+      }
+    }
+
+    if (failure != null) {
+      return;
+    }
     if (!mounted) {
       return;
     }
-    setState(() => _saving = false);
     context.go('/today');
   }
 
@@ -132,6 +173,7 @@ class _HealthProfileScreenState extends ConsumerState<HealthProfileScreen> {
   Widget build(BuildContext context) {
     final HpPalette p = context.hp;
     final HealthProfile profile = ref.watch(profileWizardProvider);
+    final String? error = _error;
 
     return Scaffold(
       body: SafeArea(
@@ -179,23 +221,57 @@ class _HealthProfileScreenState extends ConsumerState<HealthProfileScreen> {
                 color: p.ground,
                 border: Border(top: BorderSide(color: p.hairline)),
               ),
-              child: Row(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
-                  if (_step > 1) ...<Widget>[
-                    HpButton(
-                      label: 'Back',
-                      tone: HpButtonTone.secondary,
-                      expand: false,
-                      onPressed: _back,
+                  // The profile save is the second request a new account makes,
+                  // so it can be the one that pays for the cold start.
+                  const ApiWakingNotice(),
+                  if (error != null) ...<Widget>[
+                    Semantics(
+                      liveRegion: true,
+                      container: true,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Icon(
+                            Icons.error_outline_rounded,
+                            size: 18,
+                            color: p.urgentInk,
+                          ),
+                          const SizedBox(width: HpSpacing.sm),
+                          Expanded(
+                            child: Text(
+                              error,
+                              style: HpType.label.copyWith(color: p.urgentInk),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    const SizedBox(width: HpSpacing.md),
+                    const SizedBox(height: HpSpacing.md),
                   ],
-                  Expanded(
-                    child: HpButton(
-                      label: _step == _totalSteps ? 'Save profile' : 'Continue',
-                      busy: _saving,
-                      onPressed: _next,
-                    ),
+                  Row(
+                    children: <Widget>[
+                      if (_step > 1) ...<Widget>[
+                        HpButton(
+                          label: 'Back',
+                          tone: HpButtonTone.secondary,
+                          expand: false,
+                          onPressed: _back,
+                        ),
+                        const SizedBox(width: HpSpacing.md),
+                      ],
+                      Expanded(
+                        child: HpButton(
+                          label:
+                              _step == _totalSteps ? 'Save profile' : 'Continue',
+                          busy: _saving,
+                          onPressed: _next,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),

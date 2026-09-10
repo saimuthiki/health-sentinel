@@ -108,6 +108,33 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         gemini_configured=settings.has_gemini_config(),
         legacy_hs256_enabled=settings.legacy_hs256_enabled,
     )
+    # supabase_configured=False in an info line is easy to read past, and the
+    # symptom it causes is opaque: PostgREST answers 401, every endpoint returns
+    # 403, and the app tells the person their account cannot open anything. Name
+    # the missing variables, loudly, at the only moment anyone is looking.
+    if not settings.has_supabase_config():
+        missing = [
+            name
+            for name, value in (
+                ("SUPABASE_URL", settings.supabase_url),
+                ("SUPABASE_ANON_KEY", settings.supabase_anon_key),
+                ("SUPABASE_SERVICE_ROLE_KEY", settings.supabase_service_role_key),
+            )
+            if not value.strip()
+        ]
+        log.error(
+            "supabase is not configured; every request that touches user data will "
+            "fail with 403. Set the missing variables and redeploy.",
+            missing=missing,
+            readiness="GET /readyz reports this too, with status 503",
+        )
+
+    if not settings.has_gemini_config():
+        log.error(
+            "GEMINI_API_KEY is not set; report analysis and chat will fail.",
+            readiness="GET /readyz reports this too, with status 503",
+        )
+
     if settings.legacy_hs256_enabled:
         log.warning(
             "SUPABASE_JWT_SECRET is set, so legacy HS256 access tokens are accepted. "

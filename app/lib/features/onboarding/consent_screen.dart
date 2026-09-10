@@ -7,6 +7,8 @@ import '../../core/theme/hp_spacing.dart';
 import '../../core/theme/hp_typography.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/providers.dart';
+import '../common/api_waking_notice.dart';
+import '../common/failure_copy.dart';
 
 /// What we collect, where it goes, and what this app is not.
 ///
@@ -15,8 +17,23 @@ import '../../data/providers.dart';
 /// not a doctor, and uploads are analysed by Google's Gemini API. Accepting is a
 /// deliberate act - a switch each, not one pre-ticked box - and the version of
 /// this text is written to the `consents` table alongside the timestamp.
+///
+/// This is also the first backend call any account ever makes, which is why two
+/// things that look like polish are not. The wait is named while it happens
+/// ([ApiWakingNotice]), because the free host can take the better part of a
+/// minute to start and a silent spinner on a first-run screen reads as a broken
+/// app. And a refusal is shown and retried here rather than swallowed: consent
+/// that fails to record and says nothing is how somebody ends up with an
+/// account they cannot sign into.
 class ConsentScreen extends ConsumerStatefulWidget {
-  const ConsentScreen({super.key});
+  const ConsentScreen({super.key, this.recovered = false});
+
+  /// True when the person was sent here by a refusal rather than by signing up.
+  ///
+  /// Set from the `blocked` query parameter in `core/router/app_router.dart`.
+  /// It changes nothing about what is being agreed to; it only explains, on
+  /// arrival, why a screen they may have seen before is in front of them again.
+  final bool recovered;
 
   @override
   ConsumerState<ConsentScreen> createState() => _ConsentScreenState();
@@ -27,21 +44,62 @@ class _ConsentScreenState extends ConsumerState<ConsentScreen> {
   bool _acceptsAiProcessing = false;
   bool _saving = false;
 
+  /// The last refusal, in our own words, or null. Held in the widget rather
+  /// than read off the session, because a failed consent must not disturb who
+  /// the app thinks is signed in.
+  String? _error;
+
   bool get _canContinue => _understandsNotADoctor && _acceptsAiProcessing;
 
+  /// Record the consent, and go on **only** if it was actually recorded.
+  ///
+  /// The busy flag is cleared in a `finally`, so no path out of here - a thrown
+  /// failure, a timeout while the free host wakes, a bug in the repository -
+  /// can leave the button spinning for ever. Nothing navigates unless the write
+  /// succeeded: sending somebody to the profile wizard on a consent that was
+  /// never stored is what produced an account the backend then refused.
   Future<void> _accept() async {
-    setState(() => _saving = true);
-    await ref.read(sessionControllerProvider.notifier).acceptConsent();
+    if (_saving) {
+      // A second tap while the first is in flight would post the consent twice
+      // and, worse, could navigate twice.
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+
+    String? failure;
+    try {
+      await ref.read(sessionControllerProvider.notifier).acceptConsent();
+    } catch (error) {
+      failure = explainFailure(
+        error,
+        fallback: 'Your agreement could not be saved just now. Nothing was '
+            'lost - try again in a moment.',
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _error = failure;
+        });
+      }
+    }
+
+    if (failure != null) {
+      return;
+    }
     if (!mounted) {
       return;
     }
-    setState(() => _saving = false);
     context.go('/profile');
   }
 
   @override
   Widget build(BuildContext context) {
     final HpPalette p = context.hp;
+    final String? error = _error;
 
     return Scaffold(
       body: SafeArea(
@@ -71,6 +129,10 @@ class _ConsentScreenState extends ConsumerState<ConsentScreen> {
                       style: HpType.reading.copyWith(color: p.inkMuted),
                     ),
                   ),
+                  if (widget.recovered) ...<Widget>[
+                    const SizedBox(height: HpSpacing.lg),
+                    const _RecoveryNote(),
+                  ],
                   const SizedBox(height: HpSpacing.section),
                   _ConsentBlock(
                     icon: Icons.health_and_safety_outlined,
@@ -123,14 +185,86 @@ class _ConsentScreenState extends ConsumerState<ConsentScreen> {
                 color: p.ground,
                 border: Border(top: BorderSide(color: p.hairline)),
               ),
-              child: HpButton(
-                label: 'Agree and continue',
-                busy: _saving,
-                onPressed: _canContinue ? _accept : null,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  // Says the free host is starting, and roughly how long, for
+                  // as long as that is actually what is happening.
+                  const ApiWakingNotice(),
+                  if (error != null) ...<Widget>[
+                    Semantics(
+                      liveRegion: true,
+                      container: true,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Icon(
+                            Icons.error_outline_rounded,
+                            size: 18,
+                            color: p.urgentInk,
+                          ),
+                          const SizedBox(width: HpSpacing.sm),
+                          Expanded(
+                            child: Text(
+                              error,
+                              style: HpType.label.copyWith(color: p.urgentInk),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: HpSpacing.md),
+                  ],
+                  HpButton(
+                    label: 'Agree and continue',
+                    busy: _saving,
+                    onPressed: _canContinue ? _accept : null,
+                  ),
+                ],
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Why this screen is in front of you again.
+///
+/// Shown only when the app arrived here from a refusal. It is deliberately not
+/// an accusation and not an apology: it says what the server would not let
+/// through and what finishing this screen fixes, so somebody who force-quit
+/// mid-consent can see that they are back on the same step rather than lost.
+class _RecoveryNote extends StatelessWidget {
+  const _RecoveryNote();
+
+  @override
+  Widget build(BuildContext context) {
+    final HpPalette p = context.hp;
+    return Container(
+      padding: const EdgeInsets.all(HpSpacing.lg),
+      decoration: BoxDecoration(
+        color: p.marigoldSoft,
+        borderRadius: HpRadii.fieldRadius,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Icon(Icons.info_outline_rounded, size: 18, color: p.marigoldInk),
+          const SizedBox(width: HpSpacing.md),
+          Expanded(
+            child: Text(
+              'We could not confirm that this account has agreed to the notice '
+              'below, so the server would not open anything health-related. '
+              'Nothing is wrong with your account, and nothing you have saved '
+              'is lost. Agreeing here finishes the step and lets you straight '
+              'in.',
+              style: HpType.label.copyWith(color: p.marigoldInk),
+            ),
+          ),
+        ],
       ),
     );
   }

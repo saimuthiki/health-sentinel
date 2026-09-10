@@ -8,6 +8,7 @@ import '../../core/theme/hp_typography.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/models/models.dart';
 import '../../data/providers.dart';
+import '../common/failure_copy.dart';
 
 /// Settings, data and the things that only get touched once.
 class MoreScreen extends ConsumerWidget {
@@ -128,10 +129,35 @@ class MoreScreen extends ConsumerWidget {
               tone: HpButtonTone.secondary,
               icon: Icons.logout_rounded,
               onPressed: () async {
-                await ref.read(sessionControllerProvider.notifier).signOut();
-                if (context.mounted) {
-                  context.go('/welcome');
+                // Both captured before the await, so nothing reaches for
+                // `context` once this has suspended.
+                final ScaffoldMessengerState messenger =
+                    ScaffoldMessenger.of(context);
+                final GoRouter router = GoRouter.of(context);
+                try {
+                  await ref
+                      .read(sessionControllerProvider.notifier)
+                      .signOut();
+                } catch (error) {
+                  // Signing out clears the token, the cache and every
+                  // scheduled reminder. If any of that failed, the person is
+                  // still signed in, and saying so is the only honest answer -
+                  // sending them to the welcome screen would look like a
+                  // sign-out that did not happen.
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        explainFailure(
+                          error,
+                          fallback: 'We could not sign you out just now. Try '
+                              'again in a moment.',
+                        ),
+                      ),
+                    ),
+                  );
+                  return;
                 }
+                router.go('/welcome');
               },
             ),
           ],

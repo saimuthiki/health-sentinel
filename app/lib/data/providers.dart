@@ -151,6 +151,13 @@ class SessionController extends AsyncNotifier<AuthSession?> {
     );
   }
 
+  /// Record the consent, and only then say that it was recorded.
+  ///
+  /// This deliberately does **not** swallow a failure. The consent screen has
+  /// to be able to tell "stored" from "not stored", because it is what decides
+  /// whether anybody moves on: an optimistic flag flipped on a write that never
+  /// landed is how an account ends up looking consented to the app and
+  /// unconsented to the backend, which is the state that locks somebody out.
   Future<void> acceptConsent() async {
     await ref.read(healthRepositoryProvider).recordConsent(
           ConsentType.aiProcessing,
@@ -161,7 +168,18 @@ class SessionController extends AsyncNotifier<AuthSession?> {
       state = AsyncValue<AuthSession?>.data(
         current.copyWith(hasAcceptedConsent: true),
       );
+      return;
     }
+    // There is no session held here to update, which happens on exactly the
+    // path this whole fix exists for: the backend refused sign-in for want of
+    // a consent row, so the controller is in its error state, and the person
+    // was routed here to fix it. The consent is now written, so ask again -
+    // and if that still fails, the guard keeps it as state rather than
+    // throwing, because the consent itself did land and the caller must be
+    // free to carry on.
+    state = await AsyncValue.guard<AuthSession?>(
+      () => ref.read(healthRepositoryProvider).restoreSession(),
+    );
   }
 
   void markProfileComplete() {

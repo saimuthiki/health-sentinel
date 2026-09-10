@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../features/auth/sign_in_screen.dart';
 import '../../features/auth/sign_up_screen.dart';
 import '../../features/chat/chat_screen.dart';
+import '../../features/common/consent_routing.dart';
 import '../../features/more/more_screen.dart';
 import '../../features/onboarding/consent_screen.dart';
 import '../../features/plan/plan_screen.dart';
@@ -57,9 +58,14 @@ GoRouter buildAppRouter() {
             const SignUpScreen(),
       ),
       GoRoute(
+        // `?blocked=1` means the app arrived here from a refusal rather than
+        // from signing up, so the screen can say why. See
+        // `features/common/consent_routing.dart`.
         path: '/consent',
-        builder: (BuildContext context, GoRouterState state) =>
-            const ConsentScreen(),
+        builder: (BuildContext context, GoRouterState state) => ConsentScreen(
+          recovered:
+              state.uri.queryParameters[consentBlockedParam] == '1',
+        ),
       ),
       GoRoute(
         path: '/profile',

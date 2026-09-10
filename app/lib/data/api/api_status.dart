@@ -42,8 +42,9 @@ extension ApiPhaseCopy on ApiPhase {
   String? get waitingDetail {
     switch (this) {
       case ApiPhase.waking:
-        return 'It sleeps when nobody is using it, so the first open of the '
-            'day can take up to a minute. Nothing is wrong.';
+        return 'It runs on free hosting and sleeps when nobody is using it, so '
+            'the first request of the day can take up to a minute. Nothing is '
+            'wrong - please stay on this screen.';
       case ApiPhase.idle:
       case ApiPhase.working:
       case ApiPhase.ready:

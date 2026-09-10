@@ -35,18 +35,46 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     super.dispose();
   }
 
+  /// Send the message, and give it back if it did not go.
+  ///
+  /// The busy flag is cleared in a `finally`. Before this, a refused send left
+  /// `_sending` true for the life of the screen: the send button stayed
+  /// disabled, the typed message had already been cleared, and there was no way
+  /// to get either back short of leaving the tab.
   Future<void> _send() async {
     final String text = _input.text.trim();
     if (text.isEmpty || _sending) {
       return;
     }
+    // Captured before the await so nothing has to reach for `context` after it.
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
     setState(() => _sending = true);
     _input.clear();
-    await ref.read(healthRepositoryProvider).sendMessage(text);
-    ref.invalidate(messagesProvider);
-    if (mounted) {
-      setState(() => _sending = false);
+
+    String? failure;
+    try {
+      await ref.read(healthRepositoryProvider).sendMessage(text);
+      ref.invalidate(messagesProvider);
+    } catch (error) {
+      failure = explainFailure(
+        error,
+        fallback: 'That message could not be sent just now. It is still in the '
+            'box - try again in a moment.',
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _sending = false);
+      }
     }
+
+    if (failure == null || !mounted) {
+      return;
+    }
+    // The words somebody just typed are theirs; losing them to a dropped
+    // connection is not acceptable.
+    _input.text = text;
+    _input.selection = TextSelection.collapsed(offset: text.length);
+    messenger.showSnackBar(SnackBar(content: Text(failure)));
   }
 
   @override

@@ -8,6 +8,7 @@ import '../../core/theme/hp_typography.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/models/models.dart';
 import '../../data/providers.dart';
+import '../common/consent_routing.dart';
 
 /// The first frame, and the only place the app decides where someone belongs.
 ///
@@ -45,6 +46,17 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
     });
   }
 
+  /// Go somewhere the session state did not choose, once, after this frame.
+  void _scheduleGo(String location) {
+    WidgetsBinding.instance.addPostFrameCallback((Duration _) {
+      if (_routed || !mounted) {
+        return;
+      }
+      _routed = true;
+      context.go(location);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final HpPalette p = context.hp;
@@ -69,9 +81,25 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
     if (session.hasValue) {
       _scheduleRoute(session.value);
     } else if (session.hasError) {
-      // A failure to restore a session is not an error worth a screen: it means
-      // "not signed in", and the welcome screen is the honest answer.
-      _scheduleRoute(null);
+      // Except when the backend named the reason. Somebody who signed up, got
+      // as far as the consent screen and force-quit while the free host was
+      // waking has a real account with no consent row: restoring their session
+      // is refused, and sending them to the welcome screen only puts them in
+      // front of a sign-in that will be refused for exactly the same reason.
+      // The consent screen is the step they never finished, so that is where
+      // they go.
+      final String? consentRoute = consentRouteFor(
+        session.error,
+        consentAlreadyRecorded: false,
+      );
+      if (consentRoute != null) {
+        _scheduleGo(consentRoute);
+      } else {
+        // Otherwise a failure to restore a session is not an error worth a
+        // screen: it means "not signed in", and the welcome screen is the
+        // honest answer.
+        _scheduleRoute(null);
+      }
     }
 
     return _splashBody(p);
